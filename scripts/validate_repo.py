@@ -57,6 +57,11 @@ def validate_json() -> None:
     for path in (ROOT / "schemas").glob("*.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
+        schema_id = schema.get("$id")
+        if schema_id and not schema_id.startswith(
+            "https://raw.githubusercontent.com/Cartograf666/alex-ter-vibeskills/main/schemas/"
+        ):
+            raise ValueError(f"{path}: $id must use the resolvable canonical raw GitHub URL")
 
 
 def validate_yaml_syntax() -> None:

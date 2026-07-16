@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Cartograf666/alex-ter-vibeskills/schemas/design-system.schema.json",
+  "$id": "https://raw.githubusercontent.com/Cartograf666/alex-ter-vibeskills/main/schemas/design-system.schema.json",
   "title": "Project Design System Manifest",
   "type": "object",
   "additionalProperties": false,

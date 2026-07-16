@@ -315,7 +315,9 @@ class RunRecordToolsTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires --contract", result.stderr)
-        self.assertIn("WARNING: unbound validation", self.validate().stdout)
+        unbound = self.validate()
+        self.assertIn("WARNING: unbound validation", unbound.stderr)
+        self.assertNotIn("WARNING: unbound validation", unbound.stdout)
 
     def test_schema_invalid_contract_reports_errors_without_keyerror(self) -> None:
         invalid_contract = self.repo / "invalid-contract.yaml"

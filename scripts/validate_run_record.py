@@ -644,7 +644,10 @@ def main() -> int:
             print(f"ERROR: {item}", file=sys.stderr)
         return 1
     if contract is None:
-        print("WARNING: unbound validation skipped contract gates, envelope, budgets, and provider policy")
+        print(
+            "WARNING: unbound validation skipped contract gates, envelope, budgets, and provider policy",
+            file=sys.stderr,
+        )
     print(f"Valid run record: {args.record}")
     return 0
 

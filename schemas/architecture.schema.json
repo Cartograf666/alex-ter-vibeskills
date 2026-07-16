@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Cartograf666/alex-ter-vibeskills/schemas/architecture.schema.json",
+  "$id": "https://raw.githubusercontent.com/Cartograf666/alex-ter-vibeskills/main/schemas/architecture.schema.json",
   "title": "Project Architecture Manifest",
   "type": "object",
   "additionalProperties": false,
