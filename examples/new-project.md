@@ -3,6 +3,11 @@
 ```text
 Use $prepare-development-cycle.
 
+I may provide only a short idea. Inspect what you can discover, then interview
+me one question at a time for every remaining material product, architecture,
+design, delivery, automation, model-routing, budget, approval, and acceptance
+decision. Recommend an answer and explain its main trade-off.
+
 I want to build a subscription-management web product in TypeScript with PostgreSQL.
 The first release needs APIs and a responsive dashboard to create, view, and cancel a subscription.
 

@@ -25,7 +25,7 @@ def run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProces
 
 def base_contract() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "contract_id": "TEST-CONTRACT-V1",
         "status": "draft",
         "implementation_authorized": False,
@@ -115,10 +115,35 @@ def base_contract() -> dict:
             "max_elapsed_minutes": 30,
             "max_budget_usd": 5,
         },
+        "interaction_policy": {
+            "intake_mode": "guided",
+            "progress_updates": "state-transitions",
+            "interrupt_for": [
+                "protected-decision",
+                "contract-change",
+                "change-envelope-expansion",
+                "budget-exhaustion",
+                "required-gate-unavailable",
+                "provider-substitution",
+                "terminal-failure",
+            ],
+            "continue_until": "accepted-or-terminal",
+            "resume_from_run_record": True,
+        },
         "provider_policy": {
             "allowed_providers": ["local"],
             "sensitive_path_policy": "deny",
             "allow_external_code_transfer": False,
+            "role_assignments": {
+                "manager": {"preferred": "local:manager", "fallbacks": []},
+                "scout": {"preferred": "local:scout", "fallbacks": []},
+                "tester": {"preferred": "local:tester", "fallbacks": []},
+                "writer": {"preferred": "local:writer", "fallbacks": []},
+                "verifier": {"preferred": "local:verifier", "fallbacks": []},
+                "reviewer": {"preferred": "local:reviewer", "fallbacks": []},
+            },
+            "substitution_policy": "deny",
+            "reviewer_independence": "different-model",
         },
         "approval": {
             "status": "pending",
@@ -176,6 +201,33 @@ class ContractToolsTests(unittest.TestCase):
 
     def test_draft_contract_is_valid(self) -> None:
         self.assertIn("Valid development contract", self.validate().stdout)
+
+    def test_interaction_policy_requires_mandatory_interruptions(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["interaction_policy"]["interrupt_for"].remove("required-gate-unavailable")
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("interaction_policy.interrupt_for", result.stderr)
+        self.assertIn("does not contain", result.stderr)
+
+    def test_role_route_provider_must_be_allowed(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["provider_policy"]["role_assignments"]["writer"]["fallbacks"] = [
+            "google:gemini-coding"
+        ]
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("outside allowed_providers", result.stderr)
+
+    def test_reviewer_independence_rejects_same_preferred_provider(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["provider_policy"]["reviewer_independence"] = "different-provider"
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prefer different providers", result.stderr)
 
     def test_approval_is_bound_to_artifacts_and_payload(self) -> None:
         run(

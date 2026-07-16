@@ -7,7 +7,7 @@
 Turn a vague product idea into an approved development contract, bounded implementation, reproducible verification, and an auditable result—across Claude, Gemini, and OpenAI Codex environments.
 
 [![Validate](https://github.com/Cartograf666/alex-ter-vibeskills/actions/workflows/validate.yml/badge.svg)](https://github.com/Cartograf666/alex-ter-vibeskills/actions/workflows/validate.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha.1-7c3aed)](VERSION)
+[![Version](https://img.shields.io/badge/version-0.2.0--alpha.1-7c3aed)](VERSION)
 [![Agent Skills](https://img.shields.io/badge/standard-Agent%20Skills-2563eb)](https://agentskills.io/specification)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 
@@ -67,6 +67,8 @@ See the [complete installation guide](docs/INSTALLATION.md) for project-scoped i
 
 ### 3. Prepare work before coding
 
+You do not need to write a perfect prompt or know every contract field. Start with the outcome you want. The preparation skill first inspects the repository, then asks one missing material decision at a time—with a recommendation and trade-off—until product, architecture, design, delivery, automation, model routing, budgets, approvals, and acceptance evidence are sufficiently explicit.
+
 For a new project:
 
 ```text
@@ -74,7 +76,8 @@ Use $prepare-development-cycle.
 
 Prepare this new product from requirements through an approved development
 contract. Use the grilling, architecture, and design-system skills when
-applicable. Do not write production code until I approve the result.
+applicable. Interview me one question at a time for every material decision
+that cannot be discovered. Do not write production code until I approve.
 ```
 
 For an existing repository:
@@ -179,7 +182,9 @@ The preparation phase creates one versioned development contract that binds:
 - allowed, conditional, forbidden, and protected change scope;
 - exact quality-gate commands and their resolved script/configuration inputs;
 - automation, concurrency, retry, time, tool-call, and cost budgets;
-- provider and sensitive-code transfer policy;
+- progress cadence, interruption events, terminal goal, and resumability;
+- manager, scout, tester, writer, verifier, and reviewer routes with fallbacks and independence;
+- provider substitution and sensitive-code transfer policy;
 - acceptance-test ownership and freeze policy.
 
 Approval is attached to exact document, artifact, contract, and Git revision hashes. Changing an approved input invalidates authorization.

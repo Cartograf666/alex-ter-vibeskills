@@ -38,6 +38,8 @@ Treat model names as defaults, not hard requirements:
 
 Do not route by brand alone. Route by task difficulty, tool access, context size, latency, cost, and prior failures.
 
+Use the approved `provider_policy.role_assignments` first. The table above supplies recommendations only when preparation records `host:best-available` or when the user explicitly delegates the choice. Apply `substitution_policy` before changing providers or models, and meet `reviewer_independence` before returning `ACCEPT`.
+
 At runtime, resolve aliases to exact provider model IDs/versions and record them with context IDs and permissions in the run record. Do not claim reviewer independence from a role label alone.
 
 ## Routing rules

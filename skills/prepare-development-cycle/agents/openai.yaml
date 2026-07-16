@@ -1,4 +1,4 @@
 interface:
   display_name: "Prepare Development Cycle"
   short_description: "Create an approved PRD and implementation contract"
-  default_prompt: "Use $prepare-development-cycle to turn this idea into an approved PRD, technical brief, RunSpec, and Change Envelope."
+  default_prompt: "Use $prepare-development-cycle to discover repository facts, interview me one missing decision at a time, and produce an approved PRD, technical brief, RunSpec, and Change Envelope."

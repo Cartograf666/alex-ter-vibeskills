@@ -293,6 +293,21 @@ def validate_semantics(
         for role in record["roles"]:
             if role["provider"] not in allowed_providers:
                 errors.append(f"role provider is not allowed by contract: {role['provider']}")
+        actual_writers = [item for item in record["roles"] if item["role"] == "writer"]
+        if reviewer_context and len(reviewer_roles) == 1 and actual_writers:
+            actual_reviewer = reviewer_roles[0]
+            required_independence = contract["provider_policy"]["reviewer_independence"]
+            if required_independence == "different-model" and any(
+                (writer["provider"], writer["model"]) ==
+                (actual_reviewer["provider"], actual_reviewer["model"])
+                for writer in actual_writers
+            ):
+                errors.append("contract requires reviewer to use a different model from every writer")
+            if required_independence == "different-provider" and any(
+                writer["provider"] == actual_reviewer["provider"]
+                for writer in actual_writers
+            ):
+                errors.append("contract requires reviewer to use a different provider from every writer")
         transfers = record["provider_transfers"]
         if transfers and not contract["provider_policy"]["allow_external_code_transfer"]:
             errors.append("provider transfers exist while external code transfer is denied")

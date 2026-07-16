@@ -16,6 +16,10 @@ For each task:
 ```text
 Use $prepare-development-cycle.
 
+Reuse repository evidence and prior decisions. Interview me one question at a
+time only for material context that remains missing; include automation,
+interaction policy, model routing, fallbacks, budgets, and approval boundaries.
+
 Add retries for webhook delivery after temporary receiver failures.
 Use the approved project architecture and baseline. Do not change the public API.
 Create the appropriate PRD depth, Technical Brief when needed, RunSpec, and

@@ -12,6 +12,7 @@ Use one manager-controlled state machine. Let models propose changes; let determ
 Read only the references needed for the current run:
 
 - Read [roles-and-routing.md](references/roles-and-routing.md) before assigning models or agents.
+- Read [run-preflight.md](references/run-preflight.md) before entering the state machine.
 - Read [contracts.md](references/contracts.md) before delegating any work package.
 - Read [quality-gates.md](references/quality-gates.md) before implementing or verifying changes.
 - Read [architecture-integration.md](references/architecture-integration.md) when a PRD, architecture manifest, baseline, or Change Envelope exists.
@@ -48,6 +49,8 @@ Treat the approved PRD as the authority for desired behavior, the Technical Brie
 
 Run bundled `scripts/validate_contract.py` with `assets/development-contract.schema.json`. Stop when schema, traceability, policy, or approval integrity fails. Record the exact approved contract payload hash in the run record.
 
+Run the runtime preflight. Resolve exact runtime models from approved role preferences, follow the recorded substitution and interruption policies, and ask only for missing runtime decisions. Do not repeat questions answered during preparation. Return `RUN_NOT_READY` rather than inventing a required route, gate, approval, or host capability.
+
 When `design_policy.applies` is true, require the referenced design-system manifest to validate as approved. Give every relevant worker the Design Brief, permitted component/token paths, protected system files, and required design gate IDs. When false, preserve the recorded not-applicable decision unless scope changes.
 
 ## Inspect before planning
@@ -78,6 +81,8 @@ Load the approved `RunSpec` and `ChangeEnvelope`. If a lean contract is permitte
 Also identify the primary architectural layer, allowed change depth, conditional layers, forbidden layers, protected interfaces, and architecture acceptance criteria.
 
 Ask the user only when an unresolved choice would materially change behavior, data, public interfaces, security, cost, or external state. Otherwise record a conservative assumption and proceed.
+
+Follow `interaction_policy`: send updates at the requested cadence, interrupt only for configured or mandatory protected events, persist every state transition, and continue until the configured terminal goal. A chat turn ending, context compaction, or recoverable worker failure is not a terminal state; resume from the validated run record.
 
 ## Execute the state machine
 

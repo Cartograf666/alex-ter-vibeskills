@@ -251,6 +251,16 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Valid run record", result.stdout)
 
+    def test_accepted_run_enforces_contract_reviewer_model_independence(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        writer = next(item for item in record["roles"] if item["role"] == "writer")
+        reviewer = next(item for item in record["roles"] if item["role"] == "reviewer")
+        reviewer["model"] = writer["model"]
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("different model from every writer", result.stderr)
+
     def test_accepted_run_rejects_forged_gate_command(self) -> None:
         record, contract_path = self.prepare_accepted_run()
         record["gate_results"][0]["command_sha256"] = "0" * 64

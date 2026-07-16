@@ -144,6 +144,8 @@ python3 scripts/package_skills.py --check
 python3 scripts/install_skills.py --target codex --scope user --force
 ```
 
+Version `0.2.0-alpha.1` uses development-contract schema 2. Do not silently upgrade or reuse an approval from a schema 1 contract. Run `prepare-development-cycle` again, resolve the new interaction and role-routing fields, review the resulting contract, and approve it as a new version.
+
 To uninstall, delete only the five installed directories from the corresponding discovery directory. The installer never edits agent settings, credentials, or project source files outside the chosen skills directory.
 
 ## Troubleshooting

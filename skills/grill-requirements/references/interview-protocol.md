@@ -28,6 +28,8 @@ After every answer:
 3. Detect contradiction with earlier decisions.
 4. Ask the next highest-leverage unresolved question.
 
+Before the first question, derive a coverage matrix from all relevant decision-tree branches and all context already supplied. Do not expose it as a batch form. The matrix prevents early termination while the conversation remains one-question-at-a-time.
+
 When the user says "you choose" or enables auto mode:
 
 - choose the stated recommendation for reversible, low-risk decisions;

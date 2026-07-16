@@ -17,6 +17,8 @@ Interview until the important decisions are explicit. Do not implement the idea.
 
 Inspect available files, code, documentation, tools, and connected sources before asking the user. Look up discoverable facts. Ask only for decisions, preferences, priorities, trade-offs, authority, or unavailable business context.
 
+Accept a short or incomplete prompt. Build a coverage view from the relevant branches in [decision-tree.md](references/decision-tree.md); the user is not responsible for knowing which context fields to list up front.
+
 Do not ask the user to restate information already provided. Distinguish:
 
 - `FACT`: supported by evidence;
@@ -37,6 +39,8 @@ For each material decision:
 6. Wait for the user's answer before continuing.
 
 Do not present a batch questionnaire. Do not hide several decisions inside one question.
+
+Continue until every relevant material branch is resolved, explicitly defaulted, marked not applicable, or retained as a blocking open decision. Do not stop merely because the initial request was answered at a superficial level.
 
 If the user chooses auto mode, answer low-risk decisions with the recommendation, record them as assumptions, and continue. Still pause for decisions involving public behavior, data loss, security boundaries, legal or financial exposure, irreversible actions, production access, or material cost.
 

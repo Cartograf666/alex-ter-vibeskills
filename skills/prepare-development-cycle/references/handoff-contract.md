@@ -18,7 +18,8 @@ The repository example at `examples/development-contract.yaml` illustrates a com
 - immutable acceptance-test ownership policy;
 - explicit design applicability, approved system status, design acceptance, and required UI gate IDs;
 - requested and effective automation modes, policy sources, retry/concurrency/tool/time/cost limits;
-- provider and sensitive-code transfer policy;
+- interaction mode, progress cadence, interruption events, terminal goal, and resumability;
+- provider routes by role, fallbacks, substitution, reviewer independence, and sensitive-code transfer policy;
 - hash-bound approval.
 
 ## Validate before approval

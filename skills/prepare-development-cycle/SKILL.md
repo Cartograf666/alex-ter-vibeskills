@@ -10,6 +10,7 @@ Produce an approved development contract. Do not write production code.
 ## Load references and templates
 
 - Read [document-depth.md](references/document-depth.md) to select full, compact, or lean documentation.
+- Read [context-intake.md](references/context-intake.md) before asking for missing context.
 - Read [preparation-workflow.md](references/preparation-workflow.md) for the state machine.
 - Read [readiness-gate.md](references/readiness-gate.md) before requesting approval.
 - Read [handoff-contract.md](references/handoff-contract.md) before producing the final handoff.
@@ -22,6 +23,8 @@ Produce an approved development contract. Do not write production code.
 ## Establish context
 
 Inspect repository instructions, documentation, current behavior, architecture manifests, relevant code, tests, CI commands, and prior decisions. Distinguish facts from inference. Preserve unrelated user changes.
+
+Accept an incomplete or very short initial prompt. Build the coverage matrix from [context-intake.md](references/context-intake.md), reuse everything the user already supplied, discover repository facts yourself, and interview for every remaining material decision. Do not require the user to know which fields belong in the prompt.
 
 For a new project, gather product intent and bootstrap architecture through `architecture-governance` when available. For an existing project, treat the approved architecture manifest and baseline as project constraints.
 
@@ -38,6 +41,8 @@ Use `grill-requirements` when available if material product, UX, behavior, scope
 - never silently choose protected decisions.
 
 Do not ask questions whose answers cannot materially alter the document or implementation boundary.
+
+Do not draft the document set until the context completeness gate passes or the outcome is deliberately `NOT_READY`. A user-confirmed context summary is not implementation approval.
 
 ## Choose document depth
 

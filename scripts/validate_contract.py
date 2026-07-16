@@ -69,6 +69,10 @@ def error(message: str, errors: list[str]) -> None:
     errors.append(message)
 
 
+def route_provider(route: str) -> str:
+    return route.split(":", 1)[0]
+
+
 def git_is_ancestor(repository: Path, ancestor: str) -> bool:
     return subprocess.run(
         ["git", "merge-base", "--is-ancestor", ancestor, "HEAD"],
@@ -192,6 +196,29 @@ def validate_semantics(contract: dict[str, Any], repository: Path) -> list[str]:
     sources = [item["source"] for item in contract["automation"]["policy_sources"]]
     if len(sources) != len(set(sources)):
         error("policy_sources must not contain duplicate source classes", errors)
+
+    provider_policy = contract["provider_policy"]
+    allowed_providers = set(provider_policy["allowed_providers"])
+    role_assignments = provider_policy["role_assignments"]
+    for role, assignment in role_assignments.items():
+        routes = [assignment["preferred"], *assignment["fallbacks"]]
+        if assignment["preferred"] in assignment["fallbacks"]:
+            error(f"provider_policy.{role}: preferred route cannot also be a fallback", errors)
+        for route in routes:
+            provider = route_provider(route)
+            if provider not in allowed_providers:
+                error(
+                    f"provider_policy.{role}: route {route!r} uses provider outside allowed_providers",
+                    errors,
+                )
+    writer_route = role_assignments["writer"]["preferred"]
+    reviewer_route = role_assignments["reviewer"]["preferred"]
+    independence = provider_policy["reviewer_independence"]
+    if independence == "different-model" and writer_route == reviewer_route:
+        error("reviewer_independence requires writer and reviewer to prefer different models", errors)
+    if independence == "different-provider" and route_provider(writer_route) == route_provider(reviewer_route):
+        error("reviewer_independence requires writer and reviewer to prefer different providers", errors)
+
     architecture_path = contract["source_documents"]["architecture_manifest"]
     if architecture_path and "architecture_manifest" in source_paths and source_paths["architecture_manifest"].is_file():
         try:

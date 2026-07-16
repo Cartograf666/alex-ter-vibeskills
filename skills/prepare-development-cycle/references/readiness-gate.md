@@ -22,10 +22,13 @@ Return `READY` only if all required checks pass.
 - Quality-gate commands have explicit trust, sandbox, network, secrets, timeout, approval policy, and a non-empty manifest of resolved scripts, lifecycle hooks, package metadata, lockfiles, and configs they execute.
 - The effective automation mode is the most restrictive of all policy sources.
 - Provider policy explicitly decides whether code may leave the local environment.
+- Model routes, fallbacks, substitution behavior, reviewer independence, progress cadence, interruption events, terminal goal, and resumability are explicit.
 - UI applicability is explicit. Applicable work references an approved design-system manifest, a task Design Brief, required design/accessibility/visual gates, and retained evidence expectations.
 
 ## Decision readiness
 
+- Every relevant intake item is a sourced fact, explicit decision, reversible assumption, reasoned not-applicable item, or owned open item that keeps the task `NOT_READY`.
+- The user confirmed the material-context summary separately from implementation approval.
 - Critical decisions have owners and outcomes.
 - Protected decisions have explicit approval boundaries.
 - Remaining assumptions are low-risk and have a validation plan.

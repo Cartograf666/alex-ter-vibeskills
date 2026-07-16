@@ -3,13 +3,17 @@
 Use this state machine:
 
 ```text
-DISCOVER -> CLASSIFY -> GRILL -> DRAFT_PRD -> DRAFT_TECH
+DISCOVER -> CONTEXT_INTAKE -> CLASSIFY -> GRILL -> DRAFT_PRD -> DRAFT_TECH
 -> GOVERN_ARCHITECTURE -> READINESS_REVIEW -> USER_APPROVAL -> HANDOFF
 ```
 
 ## DISCOVER
 
 Gather business and repository evidence. For a greenfield project, identify constraints, deployment environment, expected scale, and chosen stack only when they affect the first delivery boundary.
+
+## CONTEXT_INTAKE
+
+Build the coverage matrix from `context-intake.md`. Reuse supplied context, discover project facts, and ask one question at a time for every material `OPEN` item. Exit only after the user confirms the material-context summary or the task is deliberately marked `NOT_READY`.
 
 ## CLASSIFY
 

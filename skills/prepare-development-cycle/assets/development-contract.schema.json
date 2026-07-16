@@ -17,11 +17,12 @@
     "test_policy",
     "design_policy",
     "automation",
+    "interaction_policy",
     "provider_policy",
     "approval"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "contract_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._-]{2,127}$" },
     "status": { "enum": ["draft", "approved", "superseded", "rejected"] },
     "implementation_authorized": { "type": "boolean" },
@@ -211,14 +212,76 @@
         "max_budget_usd": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "interaction_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intake_mode",
+        "progress_updates",
+        "interrupt_for",
+        "continue_until",
+        "resume_from_run_record"
+      ],
+      "properties": {
+        "intake_mode": { "enum": ["guided", "recommended-defaults"] },
+        "progress_updates": { "enum": ["state-transitions", "milestones", "quiet"] },
+        "interrupt_for": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "protected-decision",
+              "contract-change",
+              "change-envelope-expansion",
+              "budget-exhaustion",
+              "required-gate-unavailable",
+              "provider-substitution",
+              "terminal-failure"
+            ]
+          },
+          "allOf": [
+            { "contains": { "const": "protected-decision" } },
+            { "contains": { "const": "change-envelope-expansion" } },
+            { "contains": { "const": "budget-exhaustion" } },
+            { "contains": { "const": "required-gate-unavailable" } },
+            { "contains": { "const": "terminal-failure" } }
+          ]
+        },
+        "continue_until": { "enum": ["accepted-or-terminal", "ready-for-human-review", "next-human-decision"] },
+        "resume_from_run_record": { "const": true }
+      }
+    },
     "provider_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowed_providers", "sensitive_path_policy", "allow_external_code_transfer"],
+      "required": [
+        "allowed_providers",
+        "sensitive_path_policy",
+        "allow_external_code_transfer",
+        "role_assignments",
+        "substitution_policy",
+        "reviewer_independence"
+      ],
       "properties": {
-        "allowed_providers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "allowed_providers": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
         "sensitive_path_policy": { "enum": ["deny", "redact", "allowlisted"] },
-        "allow_external_code_transfer": { "type": "boolean" }
+        "allow_external_code_transfer": { "type": "boolean" },
+        "role_assignments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manager", "scout", "tester", "writer", "verifier", "reviewer"],
+          "properties": {
+            "manager": { "$ref": "#/$defs/modelRoute" },
+            "scout": { "$ref": "#/$defs/modelRoute" },
+            "tester": { "$ref": "#/$defs/modelRoute" },
+            "writer": { "$ref": "#/$defs/modelRoute" },
+            "verifier": { "$ref": "#/$defs/modelRoute" },
+            "reviewer": { "$ref": "#/$defs/modelRoute" }
+          }
+        },
+        "substitution_policy": { "enum": ["ask", "allow-recorded", "deny"] },
+        "reviewer_independence": { "enum": ["different-context", "different-model", "different-provider"] }
       }
     },
     "approval": { "$ref": "#/$defs/approval" }
@@ -293,6 +356,19 @@
     "componentName": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
     "changeDepth": { "enum": ["wiring-only", "adapter-only", "methods-only", "full"] },
     "automationMode": { "enum": ["manual", "bounded-auto", "full-auto"] },
+    "modelRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferred", "fallbacks"],
+      "properties": {
+        "preferred": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+        "fallbacks": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+          "uniqueItems": true
+        }
+      }
+    },
     "acceptanceCriterion": {
       "type": "object",
       "additionalProperties": false,

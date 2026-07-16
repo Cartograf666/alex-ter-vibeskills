@@ -78,7 +78,7 @@
       "additionalProperties": false,
       "required": ["role", "provider", "model", "model_version", "context_id", "permissions"],
       "properties": {
-        "role": { "enum": ["manager", "scout", "tester", "writer", "reviewer", "human"] },
+        "role": { "enum": ["manager", "scout", "tester", "writer", "verifier", "reviewer", "human"] },
         "provider": { "type": "string" },
         "model": { "type": "string" },
         "model_version": { "type": "string" },

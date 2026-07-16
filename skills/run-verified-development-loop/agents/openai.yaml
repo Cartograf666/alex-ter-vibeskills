@@ -1,4 +1,4 @@
 interface:
   display_name: "Verified Development Loop"
   short_description: "Run clean, tested multi-model coding cycles"
-  default_prompt: "Use $run-verified-development-loop to implement this change through a verified multi-model development cycle."
+  default_prompt: "Use $run-verified-development-loop to preflight this approved contract, ask only for missing runtime decisions, and continue through a verified multi-model development cycle."

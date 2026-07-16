@@ -68,4 +68,13 @@ Explore this branch for user interfaces or generated visual artifacts. If no usa
 5. Rollback criteria
 6. Human approvals
 
+## Automation and interaction branches
+
+1. Manual, bounded-auto, or full-auto operation
+2. Retry, review, concurrency, tool-call, elapsed-time, and cost limits
+3. Progress-update cadence and events that interrupt the run
+4. Terminal goal and whether a run must resume from persisted state
+5. Preferred manager, scout, tester, writer, verifier, and reviewer models
+6. Provider fallbacks, substitution policy, code-transfer boundary, and reviewer independence
+
 Stop exploring a branch when its answer cannot materially affect the planned work.
