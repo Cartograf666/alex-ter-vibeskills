@@ -7,7 +7,7 @@ Verified Development Skills follows the open Agent Skills directory format. Inst
 You need:
 
 - Git;
-- Python 3.9 or newer for the installer and bundled validators;
+- Python 3.11 or newer for the installer and bundled validators;
 - at least one supported agent host: Claude Code, Gemini CLI, or an OpenAI Codex environment.
 
 The workflow can describe cross-provider routing, but this repository does not provide provider credentials or a cross-provider transport runtime.
