@@ -28,5 +28,8 @@ Do not ask the user how to fix ordinary test or implementation failures while re
 - `RUN_READY`: the loop can proceed to `DISCOVER`.
 - `RUN_NOT_READY`: name the single blocking decision or unavailable capability.
 - `READY_FOR_HUMAN_REVIEW`: implementation and machine verification are complete but independent acceptance is unavailable.
+- `VERIFIED_NOT_ATTESTED`: deterministic gates and independent review pass, but the host lacks a trusted HMAC boundary.
+
+`ACCEPT` is possible only on a capable host that provides a trusted HMAC boundary and the contract-required independent reviewer. Ordinary CLI and chat hosts should normally target `READY_FOR_HUMAN_REVIEW`; do not imply that the toolkit itself supplies cross-provider routing, credentials, or trusted-host key custody.
 
 Persist state after every transition in `.ai/runs/<run-id>.yaml`. On continuation after an interruption or context compaction, reload the approved contract and run record, verify hashes, and resume from the last valid state instead of restarting completed work.

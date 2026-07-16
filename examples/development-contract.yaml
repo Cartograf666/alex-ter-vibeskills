@@ -1,10 +1,12 @@
-schema_version: 2
+schema_version: 3
 contract_id: WEBHOOK-RETRY-V1
 status: draft
 implementation_authorized: false
 document_depth: COMPACT_PRD
+discovery_mode: grilled
 
 source_documents:
+  decision_brief: examples/DECISION-BRIEF.md
   prd: examples/PRD.md
   technical_brief: examples/TECHNICAL-BRIEF.md
   technical_brief_omission_reason: null

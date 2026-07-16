@@ -91,6 +91,7 @@ def main() -> int:
         run("python3", "scripts/validate_design_system.py", "examples/design-system.yaml")
         run("python3", "scripts/validate_yaml.py", "examples/run-record.yaml", "schemas/run-record.schema.json")
         run("python3", "scripts/validate_yaml.py", "evals/adversarial-cases.yaml", "schemas/adversarial-evals.schema.json")
+        run("python3", "scripts/validate_yaml.py", "templates/development-contract-template.yaml", "schemas/development-contract.schema.json")
         run("python3", "-m", "unittest", "discover", "-s", "tests", "-v")
         run("python3", "scripts/package_skills.py", "--check")
         run("git", "diff", "--check")

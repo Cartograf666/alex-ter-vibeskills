@@ -81,7 +81,19 @@ def main() -> int:
             if not isinstance(current, list):
                 errors.append("--findings must contain a YAML list")
             else:
-                current_fingerprints = {finding_fingerprint(item) for item in current}
+                normalized_current: list[tuple[dict, str]] = []
+                for index, finding in enumerate(current):
+                    if not isinstance(finding, dict):
+                        errors.append(f"current finding {index} must be a YAML mapping")
+                        continue
+                    if finding.get("severity") not in SEVERITY_RANK:
+                        errors.append(f"current finding {index} has invalid or missing severity")
+                        continue
+                    try:
+                        normalized_current.append((finding, finding_fingerprint(finding)))
+                    except ValueError as exc:
+                        errors.append(f"current finding {index}: {exc}")
+                current_fingerprints = {fingerprint for _, fingerprint in normalized_current}
                 baseline_fingerprints = set(fingerprints)
                 unexpected = current_fingerprints - baseline_fingerprints
                 if unexpected:
@@ -89,8 +101,7 @@ def main() -> int:
                 baseline_by_fingerprint = {
                     item["fingerprint"]: item for item in baseline["known_violations"]
                 }
-                for finding in current:
-                    fingerprint = finding_fingerprint(finding)
+                for finding, fingerprint in normalized_current:
                     baseline_finding = baseline_by_fingerprint.get(fingerprint)
                     if baseline_finding and SEVERITY_RANK[finding["severity"]] > SEVERITY_RANK[baseline_finding["severity"]]:
                         errors.append(

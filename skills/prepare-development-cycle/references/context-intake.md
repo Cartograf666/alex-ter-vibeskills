@@ -65,4 +65,4 @@ Context is complete only when every relevant item is:
 
 Before drafting, summarize material facts, decisions, assumptions, non-applicable branches, and remaining open items. Ask the user to confirm the summary. Confirmation does not authorize implementation; contract approval remains a separate action.
 
-A current user-confirmed Decision Brief from `grill-requirements` satisfies this confirmation when repository discovery found no material contradiction or new decision. Do not make the user repeat it.
+A current user-confirmed Decision Brief from `grill-requirements` satisfies this confirmation when repository discovery found no material contradiction or new decision. Reuse its ledger as the initial coverage matrix and do not repeat its questions.

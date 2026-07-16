@@ -8,11 +8,11 @@ import hashlib
 import hmac
 import os
 import re
-import json
 from pathlib import Path
 
 import yaml
 
+from contract_lib import load_hmac_keyring
 from validate_run_record import run_payload_sha256
 
 
@@ -31,12 +31,22 @@ def main() -> int:
     args = parser.parse_args()
     payload_hash = args.payload_sha256
     if args.record:
-        record = yaml.safe_load(args.record.read_text(encoding="utf-8"))
-        payload_hash = run_payload_sha256(record)
+        try:
+            record = yaml.safe_load(args.record.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise SystemExit(f"cannot load run record: {exc}") from exc
+        if not isinstance(record, dict) or not isinstance(record.get("run_attestation"), dict):
+            raise SystemExit("--record must contain a run-record YAML mapping with run_attestation")
+        try:
+            payload_hash = run_payload_sha256(record)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SystemExit(f"--record is not canonically JSON-serializable: {exc}") from exc
     if not SHA256.fullmatch(payload_hash):
         raise SystemExit("--payload-sha256 must be a lowercase SHA-256 digest")
-    keyring_raw = os.environ.get("VIBESKILLS_RUN_HMAC_KEYS")
-    keyring = json.loads(keyring_raw) if keyring_raw else {}
+    try:
+        keyring = load_hmac_keyring("VIBESKILLS_RUN_HMAC_KEYS")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     key = keyring.get(args.key_id)
     if not key and args.key_id == "default":
         key = os.environ.get("VIBESKILLS_RUN_HMAC_KEY")

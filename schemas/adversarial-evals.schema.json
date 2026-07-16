@@ -12,12 +12,39 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "stage", "input", "expected"],
+        "required": ["id", "stage", "input", "expected", "coverage"],
         "properties": {
           "id": { "type": "string", "pattern": "^EVAL-[A-Z0-9][A-Z0-9_-]*$" },
           "stage": { "type": "string", "minLength": 2 },
           "input": { "type": "string", "minLength": 10 },
-          "expected": { "type": "string", "minLength": 10 }
+          "expected": { "type": "string", "minLength": 10 },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode", "test", "manual_reason"],
+            "properties": {
+              "mode": { "enum": ["automated", "manual"] },
+              "test": { "type": ["string", "null"] },
+              "manual_reason": { "type": ["string", "null"] }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "mode": { "const": "automated" } } },
+                "then": {
+                  "properties": {
+                    "test": { "type": "string", "pattern": "^tests\\.test_[a-z0-9_]+\\.[A-Za-z0-9_]+\\.test_[a-z0-9_]+$" },
+                    "manual_reason": { "type": "null" }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "test": { "type": "null" },
+                    "manual_reason": { "type": "string", "minLength": 10 }
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     }

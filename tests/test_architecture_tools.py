@@ -125,6 +125,37 @@ class ArchitectureToolsTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("severity increased", result.stderr)
 
+    def test_current_findings_report_missing_normalized_fields_without_keyerror(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            repo = Path(raw_temp)
+            run("git", "init", "-b", "main", cwd=repo)
+            run("git", "config", "user.name", "Test User", cwd=repo)
+            run("git", "config", "user.email", "test@example.com", cwd=repo)
+            (repo / "README.md").write_text("test\n", encoding="utf-8")
+            run("git", "add", ".", cwd=repo)
+            run("git", "commit", "-m", "Initial", cwd=repo)
+            head = run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
+            baseline = {
+                "schema_version": 1, "generated_at": "2026-07-16T00:00:00Z",
+                "source_revision": head, "known_violations": [],
+                "policy": {"allow_exact_baseline": True, "block_expansion": True, "block_new_instances": True},
+            }
+            baseline_path, findings_path = repo / "baseline.yaml", repo / "findings.yaml"
+            baseline_path.write_text(yaml.safe_dump(baseline), encoding="utf-8")
+            findings_path.write_text(
+                yaml.safe_dump([{"rule": "controllers-must-not-import-database", "severity": "high"}]),
+                encoding="utf-8",
+            )
+            result = run(
+                "python3", str(VALIDATE_BASELINE), str(baseline_path), "--findings", str(findings_path),
+                "--schema", str(ROOT / "schemas/architecture-baseline.schema.json"),
+                "--repository", str(repo), cwd=repo, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing required fields", result.stderr)
+            self.assertNotIn("KeyError", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -113,6 +113,10 @@ python3 scripts/install_skills.py --target all --scope user
 
 The installer refuses to replace an existing skill directory. Review changes first, then add `--force` when you intentionally want to update an installation.
 
+Every installed skill receives a `.vibeskills-managed.json` ownership marker. Even with `--force`, the installer refuses to delete a same-named directory without a valid matching marker; review and remove legacy or unrelated directories manually.
+
+Updates stage every skill before replacing anything and roll back the whole operation on failure. If a concurrent process prevents restoration, the installer fails with the retained `.vibeskills-*/<skill>.previous` recovery path instead of deleting the previous installation; restore or remove that directory manually after inspection.
+
 ## Install validator dependencies
 
 The interview-only `grill-requirements` skill needs no Python packages. Skills containing validators include a hash-locked `requirements.txt`. Install it from the installed skill directory when the host can execute Python:
@@ -144,7 +148,7 @@ python3 scripts/package_skills.py --check
 python3 scripts/install_skills.py --target codex --scope user --force
 ```
 
-Version `0.2.0-alpha.1` uses development-contract schema 2. Do not silently upgrade or reuse an approval from a schema 1 contract. Run `prepare-development-cycle` again, resolve the new interaction and role-routing fields, review the resulting contract, and approve it as a new version.
+Version `0.3.0-alpha.1` uses development-contract schema 3. Do not silently upgrade or reuse an earlier approval. Run `prepare-development-cycle` again, bind any persisted Decision Brief, resolve interaction and role-routing fields, review the resulting contract, and approve it as a new version.
 
 To uninstall, delete only the five installed directories from the corresponding discovery directory. The installer never edits agent settings, credentials, or project source files outside the chosen skills directory.
 

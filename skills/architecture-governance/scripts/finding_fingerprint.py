@@ -10,6 +10,10 @@ from typing import Any
 
 
 def finding_fingerprint(finding: dict[str, Any]) -> str:
+    required = ("rule_id", "rule_version", "source", "target", "edge_kind", "location")
+    missing = [field for field in required if field not in finding]
+    if missing:
+        raise ValueError(f"architecture finding is missing required fields: {', '.join(missing)}")
     payload = {
         "rule_id": finding["rule_id"],
         "rule_version": finding["rule_version"],
@@ -31,7 +35,10 @@ def main() -> int:
     parser.add_argument("--edge-kind", required=True)
     parser.add_argument("--location", required=True)
     args = parser.parse_args()
-    print(finding_fingerprint(vars(args)))
+    try:
+        print(finding_fingerprint(vars(args)))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     return 0
 
 

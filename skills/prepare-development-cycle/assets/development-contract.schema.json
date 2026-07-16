@@ -10,6 +10,7 @@
     "status",
     "implementation_authorized",
     "document_depth",
+    "discovery_mode",
     "source_documents",
     "run_spec",
     "change_envelope",
@@ -22,15 +23,17 @@
     "approval"
   ],
   "properties": {
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "contract_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._-]{2,127}$" },
     "status": { "enum": ["draft", "approved", "superseded", "rejected"] },
     "implementation_authorized": { "type": "boolean" },
     "document_depth": { "enum": ["FULL_PRD", "COMPACT_PRD", "LEAN_BRIEF"] },
+    "discovery_mode": { "enum": ["direct", "grilled"] },
     "source_documents": {
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "decision_brief",
         "prd",
         "technical_brief",
         "technical_brief_omission_reason",
@@ -40,6 +43,12 @@
         "design_brief"
       ],
       "properties": {
+        "decision_brief": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        },
         "prd": { "$ref": "#/$defs/repositoryPath" },
         "technical_brief": {
           "oneOf": [
@@ -288,6 +297,18 @@
   },
   "allOf": [
     {
+      "if": {
+        "properties": { "discovery_mode": { "const": "grilled" } }
+      },
+      "then": {
+        "properties": {
+          "source_documents": {
+            "properties": { "decision_brief": { "$ref": "#/$defs/repositoryPath" } }
+          }
+        }
+      }
+    },
+    {
       "if": { "properties": { "implementation_authorized": { "const": true } } },
       "then": {
         "properties": {
@@ -466,7 +487,7 @@
         "source_revision": { "oneOf": [{ "$ref": "#/$defs/gitSha" }, { "type": "null" }] },
         "artifact_hashes": {
           "type": "object",
-          "propertyNames": { "pattern": "^(prd|technical_brief|architecture_manifest|architecture_baseline|design_system_manifest|design_brief)$" },
+          "propertyNames": { "pattern": "^(decision_brief|prd|technical_brief|architecture_manifest|architecture_baseline|design_system_manifest|design_brief)$" },
           "additionalProperties": { "$ref": "#/$defs/sha256" }
         },
         "gate_input_hashes": {

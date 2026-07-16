@@ -11,12 +11,12 @@
     "provider_transfers", "state_transitions", "attestation_key_id", "run_attestation", "artifacts"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "run_id": { "type": "string", "pattern": "^RUN-[A-Z0-9][A-Z0-9._-]*$" },
     "contract_id": { "type": "string" },
     "contract_payload_sha256": { "$ref": "#/$defs/sha256" },
     "state": { "enum": ["DISCOVER", "SPECIFY", "PLAN", "TEST_DESIGN", "IMPLEMENT", "VERIFY", "REPAIR", "REVIEW", "ACCEPT", "ESCALATE", "COMPLETE"] },
-    "terminal_status": { "enum": ["none", "accepted", "ready-for-human-review", "blocked", "failed", "cancelled"] },
+    "terminal_status": { "enum": ["none", "accepted", "verified-not-attested", "ready-for-human-review", "blocked", "failed", "cancelled"] },
     "base_revision": { "$ref": "#/$defs/gitSha" },
     "current_revision": { "$ref": "#/$defs/gitSha" },
     "current_tree_sha256": { "$ref": "#/$defs/sha256" },
@@ -150,8 +150,8 @@
             "log_redaction": { "enum": ["applied", "not-required"] }
           }
         },
-        "execution_event_id": { "type": "string", "minLength": 1 },
-        "execution_hmac_sha256": { "$ref": "#/$defs/sha256" }
+        "execution_event_id": { "type": ["string", "null"], "minLength": 1 },
+        "execution_hmac_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
       }
     },
     "approvalEvent": {

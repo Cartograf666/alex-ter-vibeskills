@@ -7,6 +7,7 @@ import copy
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -133,3 +134,20 @@ def gate_input_hashes(contract: dict[str, Any], repository: Path) -> dict[str, s
                 raise FileNotFoundError(f"missing gate input: {path}")
             hashes[raw_path] = sha256_file(path)
     return hashes
+
+
+def load_hmac_keyring(environment_name: str) -> dict[str, str]:
+    """Parse and validate a JSON HMAC keyring from an environment variable."""
+    raw = os.environ.get(environment_name)
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{environment_name} must contain valid JSON") from exc
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not isinstance(secret, str)
+        for key, secret in value.items()
+    ):
+        raise ValueError(f"{environment_name} must be a JSON object of string keys and values")
+    return value

@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
-from contract_lib import contract_payload_sha256, load_yaml
+from contract_lib import contract_payload_sha256, load_hmac_keyring, load_yaml
 from validate_contract import default_schema_path as default_contract_schema_path
 from validate_contract import validate_semantics as validate_contract_semantics
 
@@ -138,8 +138,7 @@ def event_hmac(key_id: str, action: str, payload_hash: str, event_id: str, decid
 def resolve_run_key(key_id: str | None) -> str | None:
     if not key_id:
         return None
-    keyring_raw = os.environ.get("VIBESKILLS_RUN_HMAC_KEYS")
-    keyring = json.loads(keyring_raw) if keyring_raw else {}
+    keyring = load_hmac_keyring("VIBESKILLS_RUN_HMAC_KEYS")
     key = keyring.get(key_id)
     if not key and key_id == "default":
         key = os.environ.get("VIBESKILLS_RUN_HMAC_KEY")
@@ -151,7 +150,11 @@ def verify_host_attestation(
     action: str, payload_hash: str, event_id: str | None, actor: str,
     supplied_hmac: str | None, errors: list[str],
 ) -> bool:
-    key = resolve_run_key(key_id)
+    try:
+        key = resolve_run_key(key_id)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return False
     if not key:
         errors.append(f"{action} verification requires the selected trusted-host run HMAC key")
         return False
@@ -281,7 +284,6 @@ def validate_semantics(
                 errors.append(f"{category} artifact is missing or changed: {artifact['path']}")
 
     if contract is not None:
-        errors.extend(validate_contract_document(contract, repository, contract_schema))
         if not contract["implementation_authorized"] or contract["approval"]["status"] != "approved":
             errors.append("run record cannot rely on an unauthorized contract")
         if record["contract_id"] != contract["contract_id"]:
@@ -417,6 +419,11 @@ def validate_semantics(
                 result["execution_hmac_sha256"], errors,
             )
 
+    if contract is not None:
+        unknown_results = set(gate_results_by_id) - set(contract_gates)
+        if unknown_results:
+            errors.append(f"run contains unknown gate results: {sorted(unknown_results)}")
+
     worktree_changed_paths: dict[str, set[str]] = {}
     for worktree in record["worktrees"]:
         base, worktree_head = worktree["base_revision"], worktree["head_revision"]
@@ -441,15 +448,15 @@ def validate_semantics(
             if not any(fnmatch.fnmatch(changed_path, pattern) for pattern in worktree["allowed_paths"]):
                 errors.append(f"worktree changed path outside allowed_paths: {changed_path}")
 
-    if terminal == "accepted":
+    if terminal in {"accepted", "verified-not-attested"}:
         if contract is None:
-            errors.append("accepted run validation requires --contract")
+            errors.append(f"{terminal} run validation requires --contract")
         if record["state"] != "COMPLETE":
-            errors.append("accepted run must be COMPLETE")
+            errors.append(f"{terminal} run must be COMPLETE")
         if not transitions or transitions[0]["from"] != "START" or transitions[-1]["to"] != "COMPLETE":
-            errors.append("accepted run requires a complete START-to-COMPLETE transition ledger")
+            errors.append(f"{terminal} run requires a complete START-to-COMPLETE transition ledger")
         if dirty_paths(repository, record_path):
-            errors.append(f"accepted run has dirty paths outside .ai/runs: {dirty_paths(repository, record_path)}")
+            errors.append(f"{terminal} run has dirty paths outside .ai/runs: {dirty_paths(repository, record_path)}")
         review = record["review"]
         if review["verdict"] != "approve" or review["independence"] == "not-independent":
             errors.append("accepted run requires an independent approving review")
@@ -479,10 +486,13 @@ def validate_semantics(
             "reviewed_tree_sha256": review["reviewed_tree_sha256"],
             "findings_sha256": review["findings_sha256"],
         })
-        verify_host_attestation(
-            key_id, "review-result", review_payload, review["review_event_id"],
-            review["reviewer_context_id"] or "", review["review_hmac_sha256"], errors,
-        )
+        if terminal == "accepted":
+            verify_host_attestation(
+                key_id, "review-result", review_payload, review["review_event_id"],
+                review["reviewer_context_id"] or "", review["review_hmac_sha256"], errors,
+            )
+        elif review["review_event_id"] is not None or review["review_hmac_sha256"] is not None:
+            errors.append("verified-not-attested review must not claim a host attestation")
         if not manifest["frozen"]:
             errors.append("accepted run requires frozen acceptance tests")
         if contract and contract["test_policy"]["acceptance_tests_required"] and not manifest["files"]:
@@ -552,9 +562,6 @@ def validate_semantics(
                 errors.append(f"accepted run has duplicate passing gate results: {gate_id}")
         if contract:
             expected_gates = set(contract_gates)
-            unknown_results = set(gate_results_by_id) - expected_gates
-            if unknown_results:
-                errors.append(f"accepted run contains unknown gate results: {sorted(unknown_results)}")
             if expected_gates != passed_gates:
                 errors.append(f"accepted gate set differs from contract: missing={sorted(expected_gates-passed_gates)}, extra={sorted(passed_gates-expected_gates)}")
             criteria = {item["id"]: item for item in contract["run_spec"]["acceptance_criteria"]}
@@ -574,13 +581,26 @@ def validate_semantics(
                     if not set(evidence["gate_ids"]) <= passed_gates or not required_gates <= set(evidence["gate_ids"]):
                         errors.append(f"acceptance evidence is not bound to required passing gates: {criterion_id}")
         attestation = record["run_attestation"]
-        payload_hash = run_payload_sha256(record)
-        if attestation["payload_sha256"] != payload_hash:
-            errors.append("final run attestation payload hash does not match run record")
-        verify_host_attestation(
-            key_id, "accepted-run", payload_hash, attestation["event_id"], attestation["actor"] or "",
-            attestation["hmac_sha256"], errors,
-        )
+        if terminal == "accepted":
+            payload_hash = run_payload_sha256(record)
+            if attestation["payload_sha256"] != payload_hash:
+                errors.append("final run attestation payload hash does not match run record")
+            verify_host_attestation(
+                key_id, "accepted-run", payload_hash, attestation["event_id"], attestation["actor"] or "",
+                attestation["hmac_sha256"], errors,
+            )
+        else:
+            if key_id is not None:
+                errors.append("verified-not-attested run must not select an attestation key")
+            if record["approvals"]:
+                errors.append("verified-not-attested run must not contain runtime-attested approval events")
+            if any(value is not None for value in attestation.values()):
+                errors.append("verified-not-attested run must not claim a final host attestation")
+            if any(
+                result["execution_event_id"] is not None or result["execution_hmac_sha256"] is not None
+                for result in record["gate_results"]
+            ):
+                errors.append("verified-not-attested gate results must not claim host attestations")
 
     if terminal == "ready-for-human-review" and record["review"]["independence"] != "not-independent":
         errors.append("ready-for-human-review is only for missing independent review")
@@ -594,6 +614,10 @@ def main() -> int:
     parser.add_argument("--contract-schema", type=Path, default=default_contract_schema_path("development-contract.schema.json"))
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--contract", type=Path)
+    parser.add_argument(
+        "--allow-unbound", action="store_true",
+        help="Validate only run-record and repository invariants without contract-bound checks.",
+    )
     args = parser.parse_args()
 
     repository = args.repository.resolve()
@@ -604,13 +628,23 @@ def main() -> int:
     for item in Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(record):
         location = ".".join(str(part) for part in item.path) or "<root>"
         errors.append(f"{location}: {item.message}")
+    contract = None
+    if not args.contract and not args.allow_unbound:
+        errors.append("run validation requires --contract; use --allow-unbound only for an unbound scaffold")
+    elif args.contract:
+        try:
+            contract = load_yaml(args.contract.resolve())
+            errors.extend(validate_contract_document(contract, repository, args.contract_schema))
+        except (FileNotFoundError, ValueError, yaml.YAMLError, json.JSONDecodeError) as exc:
+            errors.append(f"cannot load contract: {exc}")
     if not errors:
-        contract = load_yaml(args.contract.resolve()) if args.contract else None
         errors.extend(validate_semantics(record, repository, record_path, contract, args.contract_schema))
     if errors:
         for item in errors:
             print(f"ERROR: {item}", file=sys.stderr)
         return 1
+    if contract is None:
+        print("WARNING: unbound validation skipped contract gates, envelope, budgets, and provider policy")
     print(f"Valid run record: {args.record}")
     return 0
 

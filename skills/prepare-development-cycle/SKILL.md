@@ -15,6 +15,7 @@ Produce an approved development contract. Do not write production code.
 - Read [readiness-gate.md](references/readiness-gate.md) before requesting approval.
 - Read [handoff-contract.md](references/handoff-contract.md) before producing the final handoff.
 - Validate the contract with [development-contract.schema.json](assets/development-contract.schema.json) and bundled `scripts/validate_contract.py`.
+- Copy [development-contract-template.yaml](assets/development-contract-template.yaml) before filling the contract; do not reconstruct the schema from memory.
 - Before using bundled Python validators in a shell-capable host, install the hash-locked packages with `python3 -m pip install --require-hashes -r requirements.txt`. In prompt-only hosts, apply the same invariants manually and disclose that executable validation did not run.
 - Copy and fill [prd-template.md](assets/prd-template.md) for full or compact PRDs.
 - Copy and fill [technical-brief-template.md](assets/technical-brief-template.md) when technical planning is needed.
@@ -59,12 +60,16 @@ Never omit observable acceptance criteria, non-goals, constraints, risks, or app
 Create one authoritative specification directory, normally:
 
 ```text
+.ai/discovery/
+└── <slug>-decision-brief.md
 .ai/specs/<slug>/
 ├── PRD.md
 ├── TECHNICAL-BRIEF.md
 ├── DESIGN-BRIEF.md
 └── development-contract.yaml
 ```
+
+If `grill-requirements` already produced a current confirmed Decision Brief, reuse it and do not repeat its interview. Run only the coverage check for newly discovered contradictions or decisions, set `discovery_mode: grilled`, and bind its repository path in `source_documents.decision_brief`. Use `discovery_mode: direct` with `null` only when preparation legitimately began without a separate grilling phase; schema validation enforces this distinction.
 
 For `LEAN_BRIEF`, `PRD.md` may be a compact problem-and-acceptance brief. Omit `TECHNICAL-BRIEF.md` only when there are no meaningful technical choices; explain the omission in the contract.
 

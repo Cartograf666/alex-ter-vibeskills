@@ -55,13 +55,20 @@ Fail new or expanded violations. Report reduced violations as improvement withou
 
 ## Finding format
 
+The machine-readable list passed to `validate_baseline.py --findings` must use exactly the normalized fingerprint inputs plus severity:
+
 ```yaml
-id: ARCH-FINDING-1
-rule: controllers-must-not-import-database
+rule_id: ARCH-NO_DB
+rule_version: 1
+severity: high
+source: controllers
+target: database
+edge_kind: data-access
 location: src/controllers/order.ts:12
-evidence: Direct import of database connection
-baseline_status: new
-impact: Transport layer now owns persistence dependency
-smallest_fix: Call existing order service instead
-verdict: block
 ```
+
+Allowed `edge_kind` values are `import`, `call`, `data-access`, `network`, `type-leak`, and `responsibility`. Normalize component names and locations consistently before fingerprinting.
+
+A stored baseline entry adds `id`, `fingerprint`, `first_seen_revision`, `reason`, `policy`, `owner`, and `review_after` as defined by `assets/architecture-baseline.schema.json`. Human-facing evidence, impact, smallest fix, and verdict may appear in a separate review report, but they do not replace the normalized machine fields above.
+
+Generate a fingerprint with bundled `scripts/finding_fingerprint.py`, or let the validator recompute it. A malformed current finding fails with a field-specific validation error rather than being treated as a new baseline item.

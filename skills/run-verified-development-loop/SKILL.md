@@ -189,6 +189,8 @@ Do not mark the task complete merely because the retry budget is exhausted.
 
 If no independent reviewer is available, never return `ACCEPT`. Use terminal status `READY_FOR_HUMAN_REVIEW` and identify the missing independent gate.
 
+If independent review and every deterministic acceptance condition pass but trusted-host HMAC attestation is unavailable, return `VERIFIED_NOT_ATTESTED`. Reserve `ACCEPT` for a capable host that verifies gate, review, and final-record attestations.
+
 ## Report the outcome
 
 Lead with the result. Include:

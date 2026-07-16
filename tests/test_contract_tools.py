@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.eval_coverage import covers_adversarial
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas/development-contract.schema.json"
@@ -25,12 +27,14 @@ def run(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProces
 
 def base_contract() -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "contract_id": "TEST-CONTRACT-V1",
         "status": "draft",
         "implementation_authorized": False,
         "document_depth": "LEAN_BRIEF",
+        "discovery_mode": "direct",
         "source_documents": {
+            "decision_brief": None,
             "prd": "PRD.md",
             "technical_brief": None,
             "technical_brief_omission_reason": "No material technical choice exists for this local fix.",
@@ -202,6 +206,32 @@ class ContractToolsTests(unittest.TestCase):
     def test_draft_contract_is_valid(self) -> None:
         self.assertIn("Valid development contract", self.validate().stdout)
 
+    def test_grilled_contract_requires_and_hashes_decision_brief(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["discovery_mode"] = "grilled"
+        contract["source_documents"]["decision_brief"] = "DECISION-BRIEF.md"
+        (self.repo / "DECISION-BRIEF.md").write_text(
+            "# Decision Brief\n\nStatus: RESOLVED\n", encoding="utf-8"
+        )
+        self.write_contract(contract)
+        run("git", "add", ".", cwd=self.repo)
+        run("git", "commit", "-m", "Add decision brief", cwd=self.repo)
+        run(
+            "python3", str(APPROVE), str(self.contract_path), "--approved-by", "user@example.com",
+            "--repository", str(self.repo), cwd=self.repo,
+        )
+        approved = yaml.safe_load(self.contract_path.read_text(encoding="utf-8"))
+        self.assertIn("decision_brief", approved["approval"]["artifact_hashes"])
+        self.assertIn("Valid development contract", self.validate().stdout)
+
+    def test_grilled_contract_rejects_missing_decision_brief_path(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["discovery_mode"] = "grilled"
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("source_documents.decision_brief", result.stderr)
+
     def test_interaction_policy_requires_mandatory_interruptions(self) -> None:
         contract = copy.deepcopy(base_contract())
         contract["interaction_policy"]["interrupt_for"].remove("required-gate-unavailable")
@@ -229,6 +259,7 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("prefer different providers", result.stderr)
 
+    @covers_adversarial("EVAL-STALE-APPROVAL")
     def test_approval_is_bound_to_artifacts_and_payload(self) -> None:
         run(
             "python3",
@@ -247,6 +278,7 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("source document hashes changed", result.stderr)
 
+    @covers_adversarial("EVAL-REQUIREMENT-DROP")
     def test_traceability_rejects_missing_prd_criterion(self) -> None:
         (self.repo / "PRD.md").write_text(
             "# PRD\n- AC-1: First.\n- AC-2: Missing from RunSpec.\n",
@@ -256,6 +288,7 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("PRD/RunSpec acceptance IDs differ", result.stderr)
 
+    @covers_adversarial("EVAL-POLICY-DOWNGRADE")
     def test_policy_cannot_be_weakened_by_task(self) -> None:
         contract = copy.deepcopy(base_contract())
         contract["automation"]["effective_mode"] = "bounded-auto"
@@ -296,6 +329,7 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("high/critical risk requires", result.stderr)
 
+    @covers_adversarial("EVAL-UNTRUSTED-GATE")
     def test_newly_generated_gate_requires_explicit_isolation(self) -> None:
         contract = copy.deepcopy(base_contract())
         gate = contract["quality_gates"][0]
@@ -325,6 +359,24 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("selected trusted-host approval HMAC key", result.stderr)
 
+    def test_runtime_attestation_rejects_malformed_keyring_without_traceback(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["run_spec"]["risk_level"] = "high"
+        self.write_contract(contract)
+        run("git", "add", ".", cwd=self.repo)
+        run("git", "commit", "-m", "Prepare malformed keyring test", cwd=self.repo)
+        env = os.environ.copy()
+        env["VIBESKILLS_APPROVAL_HMAC_KEYS"] = "{not-json"
+        result = subprocess.run(
+            ["python3", str(APPROVE), str(self.contract_path), "--approved-by", "owner@example.com",
+             "--method", "runtime-attestation", "--authority-event-id", "host-event-1",
+             "--repository", str(self.repo)],
+            cwd=self.repo, text=True, capture_output=True, env=env,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must contain valid JSON", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_runtime_attestation_uses_selected_keyring_key(self) -> None:
         contract = copy.deepcopy(base_contract())
         contract["run_spec"]["risk_level"] = "high"
@@ -346,6 +398,32 @@ class ContractToolsTests(unittest.TestCase):
             cwd=self.repo, text=True, capture_output=True, env=env,
         )
         self.assertEqual(validated.returncode, 0, validated.stderr)
+
+    def test_contract_validation_rejects_malformed_keyring_without_traceback(self) -> None:
+        contract = copy.deepcopy(base_contract())
+        contract["run_spec"]["risk_level"] = "high"
+        self.write_contract(contract)
+        run("git", "add", ".", cwd=self.repo)
+        run("git", "commit", "-m", "Prepare validation keyring test", cwd=self.repo)
+        valid_env = os.environ.copy()
+        valid_env["VIBESKILLS_APPROVAL_HMAC_KEY"] = "a-strong-test-key-with-more-than-32-bytes"
+        approved = subprocess.run(
+            ["python3", str(APPROVE), str(self.contract_path), "--approved-by", "owner@example.com",
+             "--method", "runtime-attestation", "--authority-event-id", "host-event-3",
+             "--repository", str(self.repo)],
+            cwd=self.repo, text=True, capture_output=True, env=valid_env,
+        )
+        self.assertEqual(approved.returncode, 0, approved.stderr)
+        invalid_env = os.environ.copy()
+        invalid_env["VIBESKILLS_APPROVAL_HMAC_KEYS"] = "{not-json"
+        validated = subprocess.run(
+            ["python3", str(VALIDATE), str(self.contract_path), "--schema", str(SCHEMA),
+             "--repository", str(self.repo)],
+            cwd=self.repo, text=True, capture_output=True, env=invalid_env,
+        )
+        self.assertNotEqual(validated.returncode, 0)
+        self.assertIn("must contain valid JSON", validated.stderr)
+        self.assertNotIn("Traceback", validated.stderr)
 
     def test_broad_allowed_glob_cannot_cover_conditional_scope(self) -> None:
         contract = copy.deepcopy(base_contract())
@@ -377,6 +455,7 @@ class ContractToolsTests(unittest.TestCase):
         self.write_contract(contract)
         self.assertIn("Valid development contract", self.validate().stdout)
 
+    @covers_adversarial("EVAL-UI-WITHOUT-DESIGN-SYSTEM")
     def test_ui_contract_requires_approved_design_system_and_declared_gates(self) -> None:
         (self.repo / "tokens.css").write_text(":root { --color-text: #111; }\n", encoding="utf-8")
         (self.repo / "components").mkdir()

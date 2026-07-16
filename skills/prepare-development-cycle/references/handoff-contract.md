@@ -6,11 +6,11 @@ Use the bundled canonical schema:
 assets/development-contract.schema.json
 ```
 
-The repository example at `examples/development-contract.yaml` illustrates a complete contract. Do not maintain an alternative producer-specific RunSpec.
+Copy the bundled `assets/development-contract-template.yaml` and replace every placeholder using repository evidence and confirmed decisions. Do not reconstruct this complex object from the JSON Schema alone and do not maintain an alternative producer-specific RunSpec.
 
 ## Required sections
 
-- metadata and document depth;
+- metadata, document depth, discovery mode, and repository-backed Decision Brief whenever discovery mode is `grilled`;
 - source PRD, optional Technical Brief with omission reason, architecture manifest, baseline, and applicable design-system manifest and Design Brief;
 - RunSpec with every PRD acceptance ID and verification gate IDs;
 - Change Envelope with component paths and change depth;
@@ -21,6 +21,8 @@ The repository example at `examples/development-contract.yaml` illustrates a com
 - interaction mode, progress cadence, interruption events, terminal goal, and resumability;
 - provider routes by role, fallbacks, substitution, reviewer independence, and sensitive-code transfer policy;
 - hash-bound approval.
+
+`interaction_policy.interrupt_for` may include optional `contract-change` and `provider-substitution`, but it must always include `protected-decision`, `change-envelope-expansion`, `budget-exhaustion`, `required-gate-unavailable`, and `terminal-failure`. `resume_from_run_record` is always `true`; an agent may not disable resumability in a task prompt.
 
 ## Validate before approval
 

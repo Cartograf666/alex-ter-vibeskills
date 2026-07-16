@@ -14,12 +14,14 @@ from pathlib import Path
 import yaml
 
 from tests.test_contract_tools import base_contract
+from tests.eval_coverage import covers_adversarial
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "schemas/run-record.schema.json"
 FREEZE = ROOT / "scripts/freeze_acceptance_tests.py"
 VALIDATE = ROOT / "scripts/validate_run_record.py"
+ATTEST = ROOT / "scripts/attest_run_event.py"
 APPROVE_CONTRACT = ROOT / "scripts/approve_contract.py"
 CONTRACT_SCHEMA = ROOT / "schemas/development-contract.schema.json"
 
@@ -68,7 +70,7 @@ class RunRecordToolsTests(unittest.TestCase):
     def validate(self, check: bool = True) -> subprocess.CompletedProcess[str]:
         return run(
             "python3", str(VALIDATE), str(self.record_path),
-            "--schema", str(SCHEMA), "--repository", str(self.repo),
+            "--schema", str(SCHEMA), "--repository", str(self.repo), "--allow-unbound",
             cwd=self.repo, check=check,
         )
 
@@ -200,14 +202,92 @@ class RunRecordToolsTests(unittest.TestCase):
         self.write_record(record)
         return record, contract_path
 
-    def validate_with_contract(self, contract_path: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def validate_with_contract(
+        self, contract_path: Path, check: bool = True, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        runtime_env = {"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"}
+        if env:
+            runtime_env.update(env)
         return run(
             "python3", str(VALIDATE), str(self.record_path), "--schema", str(SCHEMA),
             "--contract-schema", str(CONTRACT_SCHEMA), "--repository", str(self.repo),
             "--contract", str(contract_path), cwd=self.repo, check=check,
-            env={"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"},
+            env=runtime_env,
         )
 
+    def test_attest_run_event_cli_signs_precomputed_payload(self) -> None:
+        payload = "a" * 64
+        result = run(
+            "python3", str(ATTEST), "--payload-sha256", payload,
+            "--event-id", "event-1", "--actor", "trusted-host", cwd=self.repo,
+            env={"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"},
+        )
+        expected = attestation_hmac("accepted-run", payload, "event-1", "trusted-host")
+        self.assertIn(f"payload_sha256: {payload}", result.stdout)
+        self.assertIn(f"hmac_sha256: {expected}", result.stdout)
+
+    def test_attest_run_event_cli_signs_canonical_record_payload(self) -> None:
+        record = yaml.safe_load(self.record_path.read_text(encoding="utf-8"))
+        payload = canonical_sha256({
+            **record,
+            "run_attestation": {
+                "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
+            },
+        })
+        result = run(
+            "python3", str(ATTEST), "--record", str(self.record_path),
+            "--event-id", "event-record-1", "--actor", "trusted-host", cwd=self.repo,
+            env={"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"},
+        )
+        expected = attestation_hmac("accepted-run", payload, "event-record-1", "trusted-host")
+        self.assertIn(f"payload_sha256: {payload}", result.stdout)
+        self.assertIn(f"hmac_sha256: {expected}", result.stdout)
+
+    def test_attest_run_event_record_input_fails_cleanly_and_is_mutually_exclusive(self) -> None:
+        malformed = self.repo / "bad-run.yaml"
+        malformed.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+        bad_record = run(
+            "python3", str(ATTEST), "--record", str(malformed),
+            "--event-id", "event-1", "--actor", "trusted-host", cwd=self.repo, check=False,
+            env={"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"},
+        )
+        self.assertNotEqual(bad_record.returncode, 0)
+        self.assertIn("run-record YAML mapping", bad_record.stderr)
+        self.assertNotIn("Traceback", bad_record.stderr)
+        exclusive = run(
+            "python3", str(ATTEST), "--record", str(self.record_path),
+            "--payload-sha256", "a" * 64, "--event-id", "event-1", "--actor", "trusted-host",
+            cwd=self.repo, check=False,
+        )
+        self.assertNotEqual(exclusive.returncode, 0)
+        self.assertIn("not allowed with argument", exclusive.stderr)
+
+    def test_attest_run_event_rejects_yaml_native_values_without_traceback(self) -> None:
+        native_value = self.repo / "native-value-run.yaml"
+        native_value.write_text(
+            "run_attestation:\n  event_id: null\n  actor: null\n  payload_sha256: null\n  hmac_sha256: null\ncreated: 2026-07-16\n",
+            encoding="utf-8",
+        )
+        result = run(
+            "python3", str(ATTEST), "--record", str(native_value),
+            "--event-id", "event-1", "--actor", "trusted-host", cwd=self.repo, check=False,
+            env={"VIBESKILLS_RUN_HMAC_KEY": "test-host-secret-with-at-least-32-bytes"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not canonically JSON-serializable", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_attest_run_event_rejects_malformed_keyring_without_traceback(self) -> None:
+        result = run(
+            "python3", str(ATTEST), "--payload-sha256", "a" * 64,
+            "--event-id", "event-1", "--actor", "trusted-host", cwd=self.repo,
+            check=False, env={"VIBESKILLS_RUN_HMAC_KEYS": "{not-json"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must contain valid JSON", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    @covers_adversarial("EVAL-WRITER-TEST-TAMPER")
     def test_frozen_test_hash_detects_tampering(self) -> None:
         run(
             "python3", str(FREEZE), str(self.record_path), "acceptance_test.py",
@@ -228,6 +308,25 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("artifact is missing or changed", result.stderr)
 
+    def test_contract_is_required_unless_unbound_mode_is_explicit(self) -> None:
+        result = run(
+            "python3", str(VALIDATE), str(self.record_path), "--schema", str(SCHEMA),
+            "--repository", str(self.repo), cwd=self.repo, check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires --contract", result.stderr)
+        self.assertIn("WARNING: unbound validation", self.validate().stdout)
+
+    def test_schema_invalid_contract_reports_errors_without_keyerror(self) -> None:
+        invalid_contract = self.repo / "invalid-contract.yaml"
+        invalid_contract.write_text("schema_version: 3\n", encoding="utf-8")
+        result = self.validate_with_contract(invalid_contract, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("contract.<root>", result.stderr)
+        self.assertNotIn("KeyError", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    @covers_adversarial("EVAL-FAKE-INDEPENDENCE")
     def test_accepted_run_rejects_non_independent_review(self) -> None:
         record = yaml.safe_load(self.record_path.read_text(encoding="utf-8"))
         record["state"] = "COMPLETE"
@@ -251,6 +350,44 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Valid run record", result.stdout)
 
+    def test_verified_not_attested_is_valid_with_independent_review_and_no_hmac(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["terminal_status"] = "verified-not-attested"
+        record["attestation_key_id"] = None
+        record["gate_results"][0]["execution_event_id"] = None
+        record["gate_results"][0]["execution_hmac_sha256"] = None
+        record["review"]["review_event_id"] = None
+        record["review"]["review_hmac_sha256"] = None
+        record["run_attestation"] = {
+            "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
+        }
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Valid run record", result.stdout)
+
+    def test_verified_not_attested_rejects_fabricated_runtime_approvals(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["terminal_status"] = "verified-not-attested"
+        record["attestation_key_id"] = None
+        record["gate_results"][0]["execution_event_id"] = None
+        record["gate_results"][0]["execution_hmac_sha256"] = None
+        record["review"]["review_event_id"] = None
+        record["review"]["review_hmac_sha256"] = None
+        record["run_attestation"] = {
+            "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
+        }
+        record["approvals"] = [{
+            "action": "invented-approval", "decision": "approved", "decided_by": "model",
+            "decided_at": "2026-07-16T00:00:00Z", "payload_sha256": "0" * 64,
+            "method": "runtime-attestation", "authority_event_id": "invented-event",
+            "attestation_hmac_sha256": "0" * 64,
+        }]
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not contain runtime-attested approval events", result.stderr)
+
     def test_accepted_run_enforces_contract_reviewer_model_independence(self) -> None:
         record, contract_path = self.prepare_accepted_run()
         writer = next(item for item in record["roles"] if item["role"] == "writer")
@@ -261,13 +398,45 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("different model from every writer", result.stderr)
 
+    def test_unknown_gate_is_rejected_before_accepted_state(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["state"] = "VERIFY"
+        record["terminal_status"] = "none"
+        record["gate_results"][0]["gate_id"] = "GATE-UNKNOWN"
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("run contains unknown gate results", result.stderr)
+
+    def test_malformed_run_keyring_fails_cleanly(self) -> None:
+        _, contract_path = self.prepare_accepted_run()
+        result = self.validate_with_contract(
+            contract_path, check=False, env={"VIBESKILLS_RUN_HMAC_KEYS": "[not-an-object]"}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must contain valid JSON", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    @covers_adversarial("EVAL-BUDGET-OVERRUN")
+    def test_budget_overrun_cannot_be_hidden(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["budgets"]["tool_calls_used"] = 10_000
+        record["budgets"]["limits_exceeded"] = False
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("limits_exceeded does not match", result.stderr)
+
+    @covers_adversarial("EVAL-FORGED-GATE-EVIDENCE")
     def test_accepted_run_rejects_forged_gate_command(self) -> None:
         record, contract_path = self.prepare_accepted_run()
         record["gate_results"][0]["command_sha256"] = "0" * 64
+        record["gate_results"][0]["log_path"] = ".ai/runs/missing-gate.log"
         self.write_record(record)
         result = self.validate_with_contract(contract_path, check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("command hash differs from contract", result.stderr)
+        self.assertIn("log is missing or changed", result.stderr)
 
     def test_accepted_run_rejects_changed_log(self) -> None:
         _, contract_path = self.prepare_accepted_run()
@@ -276,6 +445,7 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("log is missing or changed", result.stderr)
 
+    @covers_adversarial("EVAL-DIRTY-AFTER-GATES")
     def test_accepted_run_rejects_dirty_source_tree(self) -> None:
         _, contract_path = self.prepare_accepted_run()
         (self.repo / "source.py").write_text("unverified = True\n", encoding="utf-8")
@@ -303,6 +473,15 @@ class RunRecordToolsTests(unittest.TestCase):
         result = self.validate_with_contract(contract_path, check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("final run attestation payload hash", result.stderr)
+
+    @covers_adversarial("EVAL-SELF-ATTESTED-APPROVAL")
+    def test_accepted_run_rejects_missing_trusted_host_hmac(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["run_attestation"]["hmac_sha256"] = None
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("accepted-run host attestation is incomplete", result.stderr)
 
     def test_gate_environment_cannot_exceed_contract_network_policy(self) -> None:
         record, contract_path = self.prepare_accepted_run()

@@ -14,14 +14,14 @@ MAPPINGS = {
     "prepare-development-cycle": {
         "assets": ["development-contract.schema.json", "design-system.schema.json"],
         "scripts": [
-            "contract_lib.py", "approve_contract.py", "validate_contract.py",
+            "contract_lib.py", "architecture_lib.py", "approve_contract.py", "validate_contract.py",
             "design_system_lib.py", "validate_design_system.py"
         ],
     },
     "run-verified-development-loop": {
         "assets": ["development-contract.schema.json", "run-record.schema.json", "design-system.schema.json"],
         "scripts": [
-            "contract_lib.py", "validate_contract.py", "validate_yaml.py",
+            "contract_lib.py", "architecture_lib.py", "validate_contract.py", "validate_yaml.py",
             "validate_run_record.py", "freeze_acceptance_tests.py", "attest_run_event.py",
             "design_system_lib.py", "validate_design_system.py"
         ],
@@ -38,6 +38,12 @@ MAPPINGS = {
         "scripts": [
             "design_system_lib.py", "validate_design_system.py", "approve_design_system.py"
         ],
+    },
+}
+
+SPECIAL_FILES = {
+    "prepare-development-cycle": {
+        "assets/development-contract-template.yaml": ROOT / "templates/development-contract-template.yaml",
     },
 }
 
@@ -63,6 +69,15 @@ def sync(check: bool) -> int:
                         drift.append(str(destination.relative_to(ROOT)))
                 else:
                     shutil.copy2(source, destination)
+    for skill, files in SPECIAL_FILES.items():
+        for relative, source in files.items():
+            destination = ROOT / "skills" / skill / relative
+            if check:
+                if not destination.is_file() or source.read_bytes() != destination.read_bytes():
+                    drift.append(str(destination.relative_to(ROOT)))
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
     requirements = ROOT / "requirements-lock.txt"
     for skill in RUNTIME_REQUIREMENTS:
         destination = ROOT / "skills" / skill / "requirements.txt"

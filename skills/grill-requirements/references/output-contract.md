@@ -1,6 +1,6 @@
 # Output Contract
 
-Produce a decision brief:
+Produce a decision brief at `.ai/discovery/<slug>-decision-brief.md` when repository writes are available:
 
 ```markdown
 # Decision Brief: <name>
@@ -45,4 +45,4 @@ Status: RESOLVED | PARTIALLY_RESOLVED | REJECTED
 READY_FOR_PREPARATION | NEEDS_MORE_DISCOVERY | DO_NOT_PROCEED
 ```
 
-Do not label the brief as a PRD and do not authorize implementation. `prepare-development-cycle` converts this decision record and repository evidence into the appropriate PRD and development contracts.
+Do not label the brief as a PRD and do not authorize implementation. `prepare-development-cycle` reuses this file without repeating resolved questions and binds it into the approved contract when present.

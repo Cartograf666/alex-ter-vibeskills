@@ -16,6 +16,7 @@ from contract_lib import (
     dump_yaml,
     gate_input_hashes,
     load_yaml,
+    load_hmac_keyring,
     source_artifact_hashes,
 )
 from jsonschema import Draft202012Validator, FormatChecker
@@ -67,8 +68,10 @@ def main() -> int:
     payload_hash = contract_payload_sha256(contract)
     source_revision = git_head(repository)
     if args.method == "runtime-attestation":
-        keyring_raw = os.environ.get("VIBESKILLS_APPROVAL_HMAC_KEYS")
-        keyring = json.loads(keyring_raw) if keyring_raw else {}
+        try:
+            keyring = load_hmac_keyring("VIBESKILLS_APPROVAL_HMAC_KEYS")
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         key = keyring.get(args.key_id)
         if not key and args.key_id == "default":
             key = os.environ.get("VIBESKILLS_APPROVAL_HMAC_KEY")

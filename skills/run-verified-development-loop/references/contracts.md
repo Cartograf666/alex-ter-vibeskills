@@ -134,6 +134,8 @@ python3 <skill-dir>/scripts/validate_run_record.py \
   --schema <skill-dir>/assets/run-record.schema.json
 ```
 
+Contract-bound validation is the default for every run state, not only acceptance. Omitting `--contract` fails closed. Use `--allow-unbound` only to inspect an initial scaffold; the command prints a warning because gates, Change Envelope, budgets, providers, and contract identity cannot be checked. Never use an unbound validation result as implementation or acceptance evidence. Unknown gate IDs are rejected whenever a contract is supplied.
+
 Update after every state-changing event. Conversational memory is not the source of truth.
 
 Normal validation is acceptance-time validation and requires the checkout `HEAD` to equal `current_revision`. For a later audit, first create a read-only checkout or worktree at the recorded revision; do not weaken the HEAD equality check.

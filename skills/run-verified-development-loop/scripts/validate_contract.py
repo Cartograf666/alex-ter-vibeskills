@@ -4,9 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
-import fnmatch
-import hashlib
 import hmac
 import os
 import re
@@ -18,11 +15,13 @@ from typing import Any
 import json
 from jsonschema import Draft202012Validator, FormatChecker
 
+from architecture_lib import architecture_payload_sha256, path_patterns_overlap
 from contract_lib import (
     approval_attestation_hmac,
     contract_payload_sha256,
     gate_input_hashes,
     load_yaml,
+    load_hmac_keyring,
     source_artifact_paths,
     source_artifact_hashes,
 )
@@ -46,25 +45,6 @@ def glob_static_prefix(pattern: str) -> str:
     return prefix.rstrip("/")
 
 
-def path_patterns_overlap(left: str, right: str) -> bool:
-    left_parts, right_parts = left.strip("/").split("/"), right.strip("/").split("/")
-    for left_part, right_part in zip(left_parts, right_parts):
-        if "**" in {left_part, right_part}:
-            return True
-        left_glob = any(token in left_part for token in ("*", "?", "["))
-        right_glob = any(token in right_part for token in ("*", "?", "["))
-        if left_glob and not right_glob and not fnmatch.fnmatchcase(right_part, left_part):
-            return False
-        if right_glob and not left_glob and not fnmatch.fnmatchcase(left_part, right_part):
-            return False
-        if not left_glob and not right_glob and left_part != right_part:
-            return False
-    if len(left_parts) == len(right_parts):
-        return True
-    remainder = left_parts[len(right_parts):] or right_parts[len(left_parts):]
-    return all(part == "**" for part in remainder)
-
-
 def error(message: str, errors: list[str]) -> None:
     errors.append(message)
 
@@ -81,21 +61,6 @@ def git_is_ancestor(repository: Path, ancestor: str) -> bool:
         stderr=subprocess.DEVNULL,
         check=False,
     ).returncode == 0
-
-
-def architecture_payload_sha256(manifest: dict[str, Any]) -> str:
-    payload = copy.deepcopy(manifest)
-    payload["status"] = "provisional"
-    payload["approval"] = {
-        "status": "pending",
-        "approved_by": None,
-        "approved_at": None,
-        "manifest_sha256": None,
-    }
-    canonical = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_semantics(contract: dict[str, Any], repository: Path) -> list[str]:
@@ -331,8 +296,11 @@ def validate_semantics(contract: dict[str, Any], repository: Path) -> list[str]:
                     event_id = approval["authority_event_id"]
                     supplied_hmac = approval["attestation_hmac_sha256"]
                     key_id = approval["key_id"]
-                    keyring_raw = os.environ.get("VIBESKILLS_APPROVAL_HMAC_KEYS")
-                    keyring = json.loads(keyring_raw) if keyring_raw else {}
+                    try:
+                        keyring = load_hmac_keyring("VIBESKILLS_APPROVAL_HMAC_KEYS")
+                    except ValueError as exc:
+                        error(str(exc), errors)
+                        keyring = {}
                     key = keyring.get(key_id) if key_id else None
                     if not key and key_id == "default":
                         key = os.environ.get("VIBESKILLS_APPROVAL_HMAC_KEY")

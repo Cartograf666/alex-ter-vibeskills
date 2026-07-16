@@ -80,4 +80,4 @@ Return one of:
 - `PARTIALLY_RESOLVED`: progress is useful but material open decisions remain;
 - `REJECTED`: the user deliberately decides not to proceed.
 
-Produce the output defined in [output-contract.md](references/output-contract.md). The result is input for `prepare-development-cycle`; it is not itself an implementation authorization.
+Produce the output defined in [output-contract.md](references/output-contract.md). Persist it at `.ai/discovery/<slug>-decision-brief.md` when repository writes are available; otherwise return it in chat and explicitly ask preparation to persist it. The result is input for `prepare-development-cycle`; it is not itself an implementation authorization.

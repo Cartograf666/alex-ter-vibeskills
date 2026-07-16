@@ -1,0 +1,125 @@
+schema_version: 3
+contract_id: CHANGE-ME-V1
+status: draft
+implementation_authorized: false
+document_depth: LEAN_BRIEF
+discovery_mode: direct
+
+source_documents:
+  decision_brief: null
+  prd: .ai/specs/<slug>/PRD.md
+  technical_brief: null
+  technical_brief_omission_reason: Replace with a concrete reason when no technical brief is needed.
+  architecture_manifest: null
+  architecture_baseline: null
+  design_system_manifest: null
+  design_brief: null
+
+run_spec:
+  objective: Replace with one observable outcome that this development cycle must achieve.
+  non_goals: []
+  acceptance_criteria:
+    - id: AC-1
+      statement: Replace with observable behavior and an unambiguous pass condition.
+      source_requirement_ids: [FR-1]
+      verification_gate_ids: [GATE-TEST]
+  constraints: []
+  compatibility_requirements: []
+  risk_level: low
+  human_approval_required_for: []
+
+change_envelope:
+  primary_component: application
+  allowed_components:
+    application:
+      reason: Replace with the component responsibility for this change.
+      depth: methods-only
+      paths: [src/**]
+    tests:
+      reason: Verify the approved acceptance behavior.
+      depth: full
+      paths: [tests/**]
+  conditional_components: {}
+  forbidden_components: []
+  protected_interfaces: []
+  architecture_acceptance:
+    - Replace with a project-specific dependency or responsibility invariant.
+
+quality_gates:
+  - id: GATE-TEST
+    command: replace-with-reviewed-project-test-command
+    source: existing-repository
+    trust: reviewed
+    requires_approval: false
+    sandbox: required
+    network: deny
+    secrets: none
+    timeout_seconds: 300
+    resolved_input_paths: [replace-with-gate-input-file]
+
+test_policy:
+  acceptance_test_owner: tester
+  writer_may_modify_acceptance_tests: false
+  freeze_after_state: TEST_DESIGN
+  acceptance_tests_required: true
+
+design_policy:
+  applies: false
+  reason: Replace with why UI design is or is not part of this task.
+  system_status: not-applicable
+  required_gate_ids: []
+  acceptance: []
+
+automation:
+  requested_mode: bounded-auto
+  effective_mode: bounded-auto
+  policy_sources:
+    - source: task
+      mode: bounded-auto
+  max_implementation_attempts: 3
+  max_review_rounds: 2
+  max_parallel_writers: 1
+  max_tool_calls: 100
+  max_elapsed_minutes: 60
+  max_budget_usd: 10
+
+interaction_policy:
+  intake_mode: guided
+  progress_updates: state-transitions
+  interrupt_for:
+    - protected-decision
+    - contract-change
+    - change-envelope-expansion
+    - budget-exhaustion
+    - required-gate-unavailable
+    - provider-substitution
+    - terminal-failure
+  continue_until: accepted-or-terminal
+  resume_from_run_record: true
+
+provider_policy:
+  allowed_providers: [host]
+  sensitive_path_policy: deny
+  allow_external_code_transfer: false
+  role_assignments:
+    manager: {preferred: "host:best-available", fallbacks: []}
+    scout: {preferred: "host:best-available", fallbacks: []}
+    tester: {preferred: "host:best-available", fallbacks: []}
+    writer: {preferred: "host:best-available", fallbacks: []}
+    verifier: {preferred: "host:best-available", fallbacks: []}
+    reviewer: {preferred: "host:best-available", fallbacks: []}
+  substitution_policy: ask
+  reviewer_independence: different-context
+
+approval:
+  status: pending
+  approved_by: null
+  approved_at: null
+  method: null
+  key_id: null
+  authority_event_id: null
+  attestation_hmac_sha256: null
+  source_revision: null
+  artifact_hashes: {}
+  gate_input_hashes: {}
+  contract_payload_sha256: null
