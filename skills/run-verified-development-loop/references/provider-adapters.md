@@ -1,5 +1,7 @@
 # Provider Adapters
 
+These adapters describe integration contracts. Installing the skill does not automatically connect providers or enforce a sandbox. Use provider-native permissions or a code-controlled runtime and report degraded operation honestly.
+
 ## Contents
 
 - Portable layout
@@ -57,6 +59,8 @@ reviewer:
 
 Create concrete Claude subagents as separate `.claude/agents/*.md` files. Use actual model aliases or full model IDs supported by the installed Claude Code version and actual Claude Code tool names such as `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, and `Agent(...)`. Enforce path restrictions with permissions or hooks; a prose role name such as `test-only-edit` is not a real tool. Do not grant the manager or reviewer write tools merely for convenience.
 
+Do not use permission-bypass modes for autonomous repository work. Use default/auto permissions plus hooks, or a disposable secret-free sandbox.
+
 ## Gemini CLI
 
 Install for one project:
@@ -81,6 +85,8 @@ gemini --sandbox --model MODEL \
 
 Parse the terminal exit code and final structured event. Treat model text as a ResultPacket proposal; independently execute repository quality gates.
 
+Enable the strongest available sandbox and policy rules. Headless operation must not imply automatic approval of untrusted commands.
+
 ## ChatGPT
 
 When ChatGPT Skills are enabled, upload the packaged skill from the Skills interface. Keep all reference files in the package. Use the default prompt or say:
@@ -93,6 +99,8 @@ Act as the sole manager and use connected coding agents as bounded workers.
 If Skills are unavailable, create a project or custom GPT, place the core manager instructions from `SKILL.md` in its instructions, and upload the files under `references/` as knowledge. This fallback provides the workflow but does not itself grant repository, shell, Claude, or Gemini access.
 
 For API orchestration, expose external coding workers as bounded tools. Prefer manager-style agent-as-tool calls over conversation handoffs because the ChatGPT/OpenAI manager must retain the state machine and final acceptance decision.
+
+Use durable human-in-the-loop interruptions for protected calls and tracing for tool, handoff, and approval evidence. Keep secrets out of serialized run context.
 
 ## Codex
 
@@ -110,6 +118,8 @@ Install for the current Codex user:
 
 Invoke with `$run-verified-development-loop`. The `agents/openai.yaml` file supplies the user-facing name and default prompt. Let Codex call external providers only through tools or CLIs that are actually installed and authorized.
 
+Apply provider policy before every delegation; do not send sensitive code merely because a provider tool is available.
+
 ## Cross-provider controller
 
 Use a small code-controlled runner when automatic Claude + Gemini + OpenAI collaboration is required. The runner, not a model, must own:
@@ -121,6 +131,8 @@ Use a small code-controlled runner when automatic Claude + Gemini + OpenAI colla
 - subprocess exit codes and full logs;
 - deterministic gates;
 - approval boundaries and cancellation.
+- provider/model/context identity and code-transfer audit;
+- budget, concurrency, network, and secret policies.
 
 Expose narrow operations to the manager:
 
@@ -133,4 +145,4 @@ run_quality_gate(command_id, worktree_id) -> GateResult
 request_human_approval(action, reason) -> Decision
 ```
 
-Do not give a model raw provider keys. Keep secrets in the controller environment and return sanitized errors. Use JSON Schema validation, per-call timeouts, bounded output, and explicit cancellation. Run every writer in an isolated filesystem or worktree and re-verify the combined result before acceptance.
+Do not give a model raw provider keys. Keep secrets in the controller environment and return sanitized errors. Validate canonical schemas before and after calls, enforce per-call timeouts and budgets, bound output, and support explicit cancellation. Run every writer in an isolated filesystem or worktree and re-verify the exact combined revision before acceptance.

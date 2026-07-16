@@ -49,6 +49,8 @@ Compare violations against stable baseline IDs. A violation is allowed only when
 - severity does not increase;
 - the changed task does not extend or duplicate it.
 
+Compute the fingerprint from rule ID/version, normalized source and target, edge kind, and location. Severity increases, rule-version changes, expanded source/target scope, or a different fingerprint are new findings rather than an exact baseline match.
+
 Fail new or expanded violations. Report reduced violations as improvement without requiring unrelated cleanup.
 
 ## Finding format

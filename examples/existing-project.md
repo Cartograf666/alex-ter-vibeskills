@@ -20,6 +20,9 @@ Add retries for webhook delivery after temporary receiver failures.
 Use the approved project architecture and baseline. Do not change the public API.
 Create the appropriate PRD depth, Technical Brief when needed, RunSpec, and
 Change Envelope. Ask me only for material decisions and do not implement yet.
+If the task affects UI, discover and preserve the existing design system first;
+create a Design Brief and required accessibility/visual gates. If it does not,
+record design_policy as not applicable with a reason.
 ```
 
 After approval:

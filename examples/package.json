@@ -1,0 +1,10 @@
+{
+  "name": "verified-development-skills-example-gates",
+  "private": true,
+  "scripts": {
+    "architecture:test": "node -e \"console.log('example architecture gate')\"",
+    "test:webhook-contract": "node -e \"console.log('example contract gate')\"",
+    "test:webhook-retry": "node -e \"console.log('example integration gate')\"",
+    "build": "node -e \"console.log('example build gate')\""
+  }
+}

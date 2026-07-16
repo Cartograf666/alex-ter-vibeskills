@@ -1,82 +1,31 @@
 schema_version: 1
 status: provisional
-architecture_style: layered
+architecture_style: replace-with-observed-or-approved-style
 
 automation:
   mode: manual
-  auto_allow:
-    - tests
-    - internal_dto
-    - dependency_injection
-    - generated_types
-  ask:
-    - database_schema
-    - public_api
-    - authentication
-    - authorization
-    - external_api_contract
-    - new_dependency
-    - cross_module_dependency
-  deny:
-    - production_deployment
-    - destructive_migration
-    - credential_change
+  auto_allow: [tests, internal_dto, dependency_injection, generated_types]
+  ask: [database_schema, public_api, authentication, authorization, external_api_contract, new_dependency, cross_component_dependency]
+  deny: [production_deployment, destructive_migration, credential_change]
 
-layers:
-  controllers:
-    paths:
-      - src/controllers/**
-    responsibilities:
-      - validate_transport_input
-      - call_application_service
-      - map_transport_response
-    may_depend_on:
-      - services
-      - contracts
-    must_not_depend_on:
-      - database
-      - repositories
-    required_checks:
-      - contract_tests
+# Replace this placeholder component with evidence-derived project components.
+components:
+  application:
+    paths: [src/**]
+    responsibilities: [replace with observed or approved responsibilities]
+    public_interfaces: []
+    internal_interfaces: []
+    required_gate_ids: []
+    change_approval_class: human
 
-  services:
-    paths:
-      - src/services/**
-    responsibilities:
-      - application_use_cases
-      - business_orchestration
-      - transaction_boundaries
-    may_depend_on:
-      - domain
-      - repository_ports
-      - external_client_ports
-    must_not_depend_on:
-      - controllers
-      - middleware
-    required_checks:
-      - unit_tests
-      - integration_tests
-
-  repositories:
-    paths:
-      - src/repositories/**
-    responsibilities:
-      - persistence_operations
-      - persistence_mapping
-    may_depend_on:
-      - domain
-      - database
-    must_not_depend_on:
-      - controllers
-      - middleware
-      - external_clients
-    required_checks:
-      - repository_tests
+dependency_rules: []
 
 architecture_checks:
-  enforcement: block-new-violations
-  commands: []
+  enforcement: report-only
+  gate_ids: []
 
 approval:
+  status: pending
   approved_by: null
   approved_at: null
+  manifest_sha256: null

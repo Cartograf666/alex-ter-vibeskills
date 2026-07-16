@@ -38,6 +38,8 @@ Treat model names as defaults, not hard requirements:
 
 Do not route by brand alone. Route by task difficulty, tool access, context size, latency, cost, and prior failures.
 
+At runtime, resolve aliases to exact provider model IDs/versions and record them with context IDs and permissions in the run record. Do not claim reviewer independence from a role label alone.
+
 ## Routing rules
 
 Use a fast worker for:
@@ -86,4 +88,4 @@ When a named provider is unavailable:
 3. Keep deterministic gates unchanged.
 4. State the substitution in the final report.
 
-If no subagent or external provider can be called, run a sequential single-model loop with explicit context boundaries: specification, implementation, fresh review, and machine verification. Never imply that independent review occurred if the same context reviewed its own work.
+If no subagent or external provider can be called, run a sequential single-model loop with explicit context boundaries for implementation and self-check plus machine verification. Never imply that independent review occurred. The strongest permitted terminal status is `READY_FOR_HUMAN_REVIEW`; a human or genuinely fresh independent reviewer is required for `ACCEPT`.

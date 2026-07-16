@@ -25,6 +25,10 @@ Auto-approve reversible low-risk scope such as tests, internal DTOs, wiring, gen
 
 Allow the manager to extend internal scope when acceptance criteria and public behavior remain fixed, checks exist, and the decision is recorded. Still require human approval for destructive data operations, production actions, credentials, protected security policy, legal/financial decisions, or explicit project protections.
 
+## Policy precedence
+
+Calculate effective authority as the most restrictive applicable mode across system, organization, project, task, and current user decision. A task or model cannot weaken a stricter project or organization policy. Record all sources and the computed effective mode in the development contract.
+
 ## Architecture Change Request
 
 Require:

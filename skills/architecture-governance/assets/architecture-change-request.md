@@ -39,6 +39,8 @@ Triggered by: <acceptance criterion>
 
 ## Decision
 
+Requested approval class: AUTO_LOW_RISK | MANAGER | HUMAN
+
 APPROVED | REJECTED | NEEDS_REVISION
 Decided by: <authority>
 Date: <date>

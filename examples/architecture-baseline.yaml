@@ -1,0 +1,8 @@
+schema_version: 1
+generated_at: "2026-07-16T00:00:00Z"
+source_revision: 1c44cf9f45934d93a0d685bdbe5f367c4e7d8ece
+known_violations: []
+policy:
+  allow_exact_baseline: true
+  block_expansion: true
+  block_new_instances: true

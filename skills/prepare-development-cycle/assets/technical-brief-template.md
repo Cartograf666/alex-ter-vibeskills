@@ -3,6 +3,7 @@
 Status: DRAFT
 Related PRD: <path>
 Architecture manifest: <path>
+Design-system manifest: <path or not applicable>
 
 ## Technical outcome
 
@@ -15,6 +16,10 @@ Architecture manifest: <path>
 ## Proposed approach
 
 <Component interactions and responsibility boundaries.>
+
+## UI implementation and design-system reuse
+
+<For UI work: reused tokens/components, justified extensions, responsive strategy, interaction/state matrix, accessibility implementation, localization/content length, visual regression, and Design Brief path. Otherwise state not applicable.>
 
 ## Affected layers and interfaces
 

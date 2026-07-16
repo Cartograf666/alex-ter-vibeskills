@@ -13,14 +13,19 @@ Produce an approved development contract. Do not write production code.
 - Read [preparation-workflow.md](references/preparation-workflow.md) for the state machine.
 - Read [readiness-gate.md](references/readiness-gate.md) before requesting approval.
 - Read [handoff-contract.md](references/handoff-contract.md) before producing the final handoff.
+- Validate the contract with [development-contract.schema.json](assets/development-contract.schema.json) and bundled `scripts/validate_contract.py`.
+- Before using bundled Python validators in a shell-capable host, install the hash-locked packages with `python3 -m pip install --require-hashes -r requirements.txt`. In prompt-only hosts, apply the same invariants manually and disclose that executable validation did not run.
 - Copy and fill [prd-template.md](assets/prd-template.md) for full or compact PRDs.
 - Copy and fill [technical-brief-template.md](assets/technical-brief-template.md) when technical planning is needed.
+- Use `design-system-governance` for any user interface or generated visual artifact. Reuse `.ai/design-system.yaml`; if none exists, discover or select a foundation and create a task `DESIGN-BRIEF.md` before approval.
 
 ## Establish context
 
 Inspect repository instructions, documentation, current behavior, architecture manifests, relevant code, tests, CI commands, and prior decisions. Distinguish facts from inference. Preserve unrelated user changes.
 
 For a new project, gather product intent and bootstrap architecture through `architecture-governance` when available. For an existing project, treat the approved architecture manifest and baseline as project constraints.
+
+Classify design applicability explicitly. For UI work, inspect the approved design system, tokens, component explorer, design files, current screens, accessibility setup, and visual tests. For non-UI work, record a concrete not-applicable reason in `design_policy`.
 
 ## Resolve ambiguity
 
@@ -52,10 +57,13 @@ Create one authoritative specification directory, normally:
 .ai/specs/<slug>/
 ├── PRD.md
 ├── TECHNICAL-BRIEF.md
+├── DESIGN-BRIEF.md
 └── development-contract.yaml
 ```
 
 For `LEAN_BRIEF`, `PRD.md` may be a compact problem-and-acceptance brief. Omit `TECHNICAL-BRIEF.md` only when there are no meaningful technical choices; explain the omission in the contract.
+
+Create `DESIGN-BRIEF.md` only when `design_policy.applies` is true. It must reference an approved `.ai/design-system.yaml`, enumerate required interaction/content/responsive states, and map design acceptance to deterministic and visual gate IDs.
 
 ### PRD
 
@@ -73,9 +81,23 @@ Translate the approved behavior into a technical approach grounded in the actual
 
 Do not invent repository facts. Mark uncertain design choices explicitly.
 
+### Design system and Design Brief
+
+Invoke `design-system-governance` to discover an existing system before proposing one. When absent, conduct its one-question-at-a-time selection interview; do not silently choose a fashionable library. Separate component foundation from visual direction and obtain explicit approval for the resulting project manifest.
+
+For UI tasks, include token/component reuse, new extensions, viewport and content-state matrices, accessibility, interaction, motion, localization, screenshot references, and visual-regression strategy. Treat new tokens, primitives, public component APIs, or intentional deviations as protected design-system changes.
+
 ### Development contract
 
-Produce machine-readable `RunSpec` and `ChangeEnvelope` using [handoff-contract.md](references/handoff-contract.md). The RunSpec states what must work. The Change Envelope states where and how deeply the implementation may change the project.
+Produce the canonical versioned contract defined by [development-contract.schema.json](assets/development-contract.schema.json) and [handoff-contract.md](references/handoff-contract.md). The RunSpec states what must work. The Change Envelope states where and how deeply implementation may change the project. Quality gates, automation limits, provider policy, and test ownership belong to the same contract; do not create a second incompatible schema.
+
+Require complete traceability:
+
+```text
+PRD requirement ID -> PRD acceptance ID -> RunSpec acceptance ID -> quality gate ID
+```
+
+The set of PRD and RunSpec `AC-*` IDs must match exactly. Run the bundled validator before requesting approval.
 
 ## Apply architecture governance
 
@@ -98,6 +120,7 @@ Run the readiness gate. Present a concise summary of:
 - acceptance criteria;
 - Change Envelope;
 - protected decisions and human-approval boundaries;
+- design-system status, visual direction, and UI evidence requirements when applicable;
 - unresolved assumptions and risks.
 
 Request explicit approval. Until approval, set:
@@ -114,6 +137,8 @@ status: approved
 implementation_authorized: true
 approved_by: user
 ```
+
+Do not toggle these fields manually. Run bundled `scripts/approve_contract.py` so approval binds to source-document hashes, the canonical contract payload hash, and the repository revision. Rerun `scripts/validate_contract.py` immediately afterward. Any material document or contract change invalidates approval and returns the work to preparation.
 
 Do not automatically begin implementation unless the user explicitly asks to continue into `run-verified-development-loop`.
 

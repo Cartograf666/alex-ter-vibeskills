@@ -33,12 +33,23 @@ The delivery service performs one outbound request. Timeouts and server-side rec
 - FR-3: Mark delivery terminal after the configured maximum attempt count.
 - FR-4: Emit observable attempt and terminal-outcome events.
 
+## Quality attributes
+
+- NFR-1: Preserve the existing public payload and successful-delivery behavior.
+- NFR-2: Bound retry attempts and backoff so one failing receiver cannot cause unbounded work.
+
 ## Acceptance criteria
 
 - AC-1: Temporary receiver failures are retried according to the configured schedule.
 - AC-2: Successful, permanent-failure, and exhausted-retry outcomes are distinguishable.
 - AC-3: Permanent receiver failures are not retried.
 - AC-4: Existing successful delivery behavior and public payload remain compatible.
+
+## Success measures
+
+- Temporary failures that recover within the retry window reach successful delivery.
+- Retry volume, success-after-retry rate, and exhausted deliveries are observable.
+- No increase occurs in duplicate deliveries caused by the retry implementation.
 
 ## Rollout and rollback
 
@@ -52,3 +63,8 @@ Release behind an internal configuration switch. Monitor retry volume, success-a
 ## Decisions
 
 - DEC-1: Retry policy belongs to the service layer; transport classification belongs to the external client adapter.
+
+## Assumptions and open questions
+
+- ASSUMPTION-1: Existing delivery identifiers are stable across retry attempts; validate during technical preparation.
+- OPEN-1: Confirm the initial maximum-attempt and backoff values with the service owner before release.

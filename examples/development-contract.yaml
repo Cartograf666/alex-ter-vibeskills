@@ -1,65 +1,164 @@
 schema_version: 1
-status: approved
-implementation_authorized: true
+contract_id: WEBHOOK-RETRY-V1
+status: draft
+implementation_authorized: false
 document_depth: COMPACT_PRD
 
 source_documents:
-  prd: .ai/specs/webhook-retry/PRD.md
-  technical_brief: .ai/specs/webhook-retry/TECHNICAL-BRIEF.md
-  architecture_manifest: .ai/architecture.yaml
-  architecture_baseline: .ai/architecture-baseline.yaml
+  prd: examples/PRD.md
+  technical_brief: examples/TECHNICAL-BRIEF.md
+  technical_brief_omission_reason: null
+  architecture_manifest: examples/architecture.yaml
+  architecture_baseline: examples/architecture-baseline.yaml
+  design_system_manifest: null
+  design_brief: null
 
 run_spec:
-  objective: Retry webhook delivery after temporary receiver failures
+  objective: Retry webhook delivery after temporary receiver failures without changing the public webhook contract
   non_goals:
     - Change the public webhook API
+    - Retry permanent receiver errors
   acceptance_criteria:
     - id: AC-1
-      statement: Temporary receiver failures are retried with bounded backoff
-      verification: Integration test for retry schedule and terminal outcome
+      statement: Temporary receiver failures are retried according to the configured bounded schedule
+      source_requirement_ids: [FR-1, FR-2, NFR-2]
+      verification_gate_ids: [GATE-INTEGRATION]
+    - id: AC-2
+      statement: Successful, permanent-failure, and exhausted-retry outcomes are distinguishable
+      source_requirement_ids: [FR-3, FR-4]
+      verification_gate_ids: [GATE-INTEGRATION]
+    - id: AC-3
+      statement: Permanent receiver failures are not retried
+      source_requirement_ids: [FR-1, FR-3]
+      verification_gate_ids: [GATE-INTEGRATION]
+    - id: AC-4
+      statement: Existing successful delivery behavior and the public payload remain compatible
+      source_requirement_ids: [FR-4, NFR-1]
+      verification_gate_ids: [GATE-CONTRACT, GATE-BUILD]
   constraints:
     - Preserve existing delivery semantics for successful requests
-  verification_expectations:
-    - npm run architecture:test
-    - npm run lint
-    - npm run typecheck
-    - npm test
-    - npm run build
+  compatibility_requirements:
+    - Preserve the public webhook payload and endpoint contract
+  risk_level: medium
   human_approval_required_for:
-    - database schema changes
+    - Database schema changes
+    - Public webhook contract changes
 
 change_envelope:
-  primary_layer: services
-  allowed_layers:
+  primary_component: services
+  allowed_components:
     services:
-      reason: Retry orchestration
+      reason: Own the retry orchestration policy
       depth: full
-    external_clients:
-      reason: Classify transport failures
+      paths: [src/services/**]
+    external-clients:
+      reason: Classify transport failures at the protocol boundary
       depth: methods-only
+      paths: [src/clients/**, src/integrations/**]
     repositories:
-      reason: Persist existing retry state
+      reason: Persist retry state through existing storage contracts
       depth: methods-only
+      paths: [src/repositories/**]
     tests:
-      reason: Acceptance coverage
+      reason: Cover acceptance behavior and compatibility
       depth: full
-  conditional_layers:
+      paths: [tests/**]
+  conditional_components:
     database:
-      condition: Existing schema cannot persist retry state
-      approval: ask
-  forbidden_layers:
-    - middleware
-  protected_interfaces:
-    - public_webhook_api
+      condition: Existing schema cannot persist the required retry state
+      approval_class: human
+      maximum_depth: full
+      paths: [src/db/**, migrations/**]
+  forbidden_components: [middleware]
+  protected_interfaces: [public_webhook_api]
   architecture_acceptance:
     - Retry policy remains in the service layer
     - External protocol handling remains in the client adapter
 
+quality_gates:
+  - id: GATE-ARCH
+    command: npm --prefix examples run architecture:test
+    source: existing-repository
+    trust: reviewed
+    requires_approval: false
+    sandbox: required
+    network: deny
+    secrets: none
+    timeout_seconds: 120
+    resolved_input_paths: [examples/package.json]
+  - id: GATE-CONTRACT
+    command: npm --prefix examples run test:webhook-contract
+    source: existing-repository
+    trust: reviewed
+    requires_approval: false
+    sandbox: required
+    network: deny
+    secrets: none
+    timeout_seconds: 300
+    resolved_input_paths: [examples/package.json]
+  - id: GATE-INTEGRATION
+    command: npm --prefix examples run test:webhook-retry
+    source: existing-repository
+    trust: reviewed
+    requires_approval: false
+    sandbox: required
+    network: deny
+    secrets: none
+    timeout_seconds: 300
+    resolved_input_paths: [examples/package.json]
+  - id: GATE-BUILD
+    command: npm --prefix examples run build
+    source: existing-repository
+    trust: reviewed
+    requires_approval: false
+    sandbox: required
+    network: deny
+    secrets: none
+    timeout_seconds: 600
+    resolved_input_paths: [examples/package.json]
+
+test_policy:
+  acceptance_test_owner: tester
+  writer_may_modify_acceptance_tests: false
+  freeze_after_state: TEST_DESIGN
+  acceptance_tests_required: true
+
+design_policy:
+  applies: false
+  reason: This example changes a backend webhook service without a user interface
+  system_status: not-applicable
+  required_gate_ids: []
+  acceptance: []
+
 automation:
-  mode: bounded-auto
+  requested_mode: bounded-auto
+  effective_mode: bounded-auto
+  policy_sources:
+    - source: project
+      mode: bounded-auto
+    - source: task
+      mode: bounded-auto
   max_implementation_attempts: 3
   max_review_rounds: 2
+  max_parallel_writers: 2
+  max_tool_calls: 200
+  max_elapsed_minutes: 120
+  max_budget_usd: 25
+
+provider_policy:
+  allowed_providers: [anthropic, google, openai]
+  sensitive_path_policy: deny
+  allow_external_code_transfer: false
 
 approval:
-  approved_by: user
-  approved_at: 2026-07-16
+  status: pending
+  approved_by: null
+  approved_at: null
+  method: null
+  key_id: null
+  authority_event_id: null
+  attestation_hmac_sha256: null
+  source_revision: null
+  artifact_hashes: {}
+  gate_input_hashes: {}
+  contract_payload_sha256: null

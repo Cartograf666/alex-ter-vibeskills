@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Cartograf666/alex-ter-vibeskills/schemas/development-contract.schema.json",
+  "title": "Verified Development Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "status",
+    "implementation_authorized",
+    "document_depth",
+    "source_documents",
+    "run_spec",
+    "change_envelope",
+    "quality_gates",
+    "test_policy",
+    "design_policy",
+    "automation",
+    "provider_policy",
+    "approval"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "contract_id": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._-]{2,127}$" },
+    "status": { "enum": ["draft", "approved", "superseded", "rejected"] },
+    "implementation_authorized": { "type": "boolean" },
+    "document_depth": { "enum": ["FULL_PRD", "COMPACT_PRD", "LEAN_BRIEF"] },
+    "source_documents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prd",
+        "technical_brief",
+        "technical_brief_omission_reason",
+        "architecture_manifest",
+        "architecture_baseline",
+        "design_system_manifest",
+        "design_brief"
+      ],
+      "properties": {
+        "prd": { "$ref": "#/$defs/repositoryPath" },
+        "technical_brief": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        },
+        "technical_brief_omission_reason": {
+          "oneOf": [
+            { "type": "string", "minLength": 10 },
+            { "type": "null" }
+          ]
+        },
+        "architecture_manifest": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        },
+        "architecture_baseline": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        },
+        "design_system_manifest": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        },
+        "design_brief": {
+          "oneOf": [
+            { "$ref": "#/$defs/repositoryPath" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "run_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "objective",
+        "non_goals",
+        "acceptance_criteria",
+        "constraints",
+        "compatibility_requirements",
+        "risk_level",
+        "human_approval_required_for"
+      ],
+      "properties": {
+        "objective": { "type": "string", "minLength": 10 },
+        "non_goals": { "type": "array", "items": { "type": "string", "minLength": 3 } },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/acceptanceCriterion" }
+        },
+        "constraints": { "type": "array", "items": { "type": "string", "minLength": 3 } },
+        "compatibility_requirements": { "type": "array", "items": { "type": "string", "minLength": 3 } },
+        "risk_level": { "enum": ["low", "medium", "high", "critical"] },
+        "human_approval_required_for": { "type": "array", "items": { "type": "string", "minLength": 3 } }
+      }
+    },
+    "change_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_component",
+        "allowed_components",
+        "conditional_components",
+        "forbidden_components",
+        "protected_interfaces",
+        "architecture_acceptance"
+      ],
+      "properties": {
+        "primary_component": { "$ref": "#/$defs/componentName" },
+        "allowed_components": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/componentPermission" }
+        },
+        "conditional_components": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/conditionalPermission" }
+        },
+        "forbidden_components": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/componentName" },
+          "uniqueItems": true
+        },
+        "protected_interfaces": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 2 },
+          "uniqueItems": true
+        },
+        "architecture_acceptance": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 5 }
+        }
+      }
+    },
+    "quality_gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/qualityGate" }
+    },
+    "test_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptance_test_owner", "writer_may_modify_acceptance_tests", "freeze_after_state", "acceptance_tests_required"],
+      "properties": {
+        "acceptance_test_owner": { "enum": ["tester", "manager", "human"] },
+        "writer_may_modify_acceptance_tests": { "const": false },
+        "freeze_after_state": { "const": "TEST_DESIGN" },
+        "acceptance_tests_required": { "type": "boolean" }
+      }
+    },
+    "design_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applies", "reason", "system_status", "required_gate_ids", "acceptance"],
+      "properties": {
+        "applies": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 5 },
+        "system_status": { "enum": ["approved-existing", "approved-adopted", "approved-custom", "not-applicable"] },
+        "required_gate_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^GATE-[A-Z0-9][A-Z0-9_-]*$" }
+        },
+        "acceptance": { "type": "array", "items": { "type": "string", "minLength": 5 } }
+      }
+    },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_mode",
+        "effective_mode",
+        "policy_sources",
+        "max_implementation_attempts",
+        "max_review_rounds",
+        "max_parallel_writers",
+        "max_tool_calls",
+        "max_elapsed_minutes",
+        "max_budget_usd"
+      ],
+      "properties": {
+        "requested_mode": { "$ref": "#/$defs/automationMode" },
+        "effective_mode": { "$ref": "#/$defs/automationMode" },
+        "policy_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "mode"],
+            "properties": {
+              "source": { "enum": ["system", "organization", "project", "task", "user"] },
+              "mode": { "$ref": "#/$defs/automationMode" }
+            }
+          }
+        },
+        "max_implementation_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "max_review_rounds": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "max_parallel_writers": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "max_tool_calls": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "max_elapsed_minutes": { "type": "integer", "minimum": 1, "maximum": 10080 },
+        "max_budget_usd": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "provider_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_providers", "sensitive_path_policy", "allow_external_code_transfer"],
+      "properties": {
+        "allowed_providers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "sensitive_path_policy": { "enum": ["deny", "redact", "allowlisted"] },
+        "allow_external_code_transfer": { "type": "boolean" }
+      }
+    },
+    "approval": { "$ref": "#/$defs/approval" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "implementation_authorized": { "const": true } } },
+      "then": {
+        "properties": {
+          "status": { "const": "approved" },
+          "approval": {
+            "properties": {
+              "status": { "const": "approved" },
+              "approved_by": { "type": "string", "minLength": 1 },
+              "approved_at": { "type": "string", "format": "date-time" },
+              "method": { "enum": ["local-confirmation", "runtime-attestation"] },
+              "key_id": { "type": ["string", "null"] },
+              "source_revision": { "$ref": "#/$defs/gitSha" },
+              "contract_payload_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    }
+    ,
+    {
+      "if": { "properties": { "design_policy": { "properties": { "applies": { "const": true } } } } },
+      "then": {
+        "properties": {
+          "source_documents": {
+            "properties": {
+              "design_system_manifest": { "$ref": "#/$defs/repositoryPath" },
+              "design_brief": { "$ref": "#/$defs/repositoryPath" }
+            }
+          },
+          "design_policy": {
+            "properties": {
+              "system_status": { "enum": ["approved-existing", "approved-adopted", "approved-custom"] },
+              "required_gate_ids": { "minItems": 1 },
+              "acceptance": { "minItems": 1 }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "source_documents": {
+            "properties": {
+              "design_system_manifest": { "type": "null" },
+              "design_brief": { "type": "null" }
+            }
+          },
+          "design_policy": {
+            "properties": {
+              "system_status": { "const": "not-applicable" },
+              "required_gate_ids": { "maxItems": 0 },
+              "acceptance": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "not": { "pattern": "^(?:/|~|[A-Za-z]:[\\\\/])" }
+    },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "componentName": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
+    "changeDepth": { "enum": ["wiring-only", "adapter-only", "methods-only", "full"] },
+    "automationMode": { "enum": ["manual", "bounded-auto", "full-auto"] },
+    "acceptanceCriterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "source_requirement_ids", "verification_gate_ids"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^AC-[1-9][0-9]*$" },
+        "statement": { "type": "string", "minLength": 8 },
+        "source_requirement_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^(?:FR|NFR|GOAL)-[1-9][0-9]*$" },
+          "uniqueItems": true
+        },
+        "verification_gate_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^GATE-[A-Z0-9][A-Z0-9_-]*$" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "componentPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "depth", "paths"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 5 },
+        "depth": { "$ref": "#/$defs/changeDepth" },
+        "paths": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "conditionalPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition", "approval_class", "maximum_depth", "paths"],
+      "properties": {
+        "condition": { "type": "string", "minLength": 5 },
+        "approval_class": { "enum": ["auto-low-risk", "manager", "human"] },
+        "maximum_depth": { "$ref": "#/$defs/changeDepth" },
+        "paths": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "qualityGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "command",
+        "source",
+        "trust",
+        "requires_approval",
+        "sandbox",
+        "network",
+        "secrets",
+        "timeout_seconds",
+        "resolved_input_paths"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^GATE-[A-Z0-9][A-Z0-9_-]*$" },
+        "command": { "type": "string", "minLength": 1 },
+        "source": { "enum": ["existing-repository", "approved-contract", "newly-generated"] },
+        "trust": { "enum": ["reviewed", "untrusted"] },
+        "requires_approval": { "type": "boolean" },
+        "sandbox": { "enum": ["required", "recommended"] },
+        "network": { "enum": ["deny", "allowlisted"] },
+        "secrets": { "enum": ["none", "allowlisted"] },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "resolved_input_paths": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/repositoryPath" }, "uniqueItems": true }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "approved_by",
+        "approved_at",
+        "method",
+        "key_id",
+        "authority_event_id",
+        "attestation_hmac_sha256",
+        "source_revision",
+        "artifact_hashes",
+        "gate_input_hashes",
+        "contract_payload_sha256"
+      ],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "invalidated"] },
+        "approved_by": { "type": ["string", "null"] },
+        "approved_at": { "type": ["string", "null"], "format": "date-time" },
+        "method": { "oneOf": [{ "enum": ["local-confirmation", "runtime-attestation"] }, { "type": "null" }] },
+        "key_id": { "type": ["string", "null"] },
+        "authority_event_id": { "type": ["string", "null"] },
+        "attestation_hmac_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "source_revision": { "oneOf": [{ "$ref": "#/$defs/gitSha" }, { "type": "null" }] },
+        "artifact_hashes": {
+          "type": "object",
+          "propertyNames": { "pattern": "^(prd|technical_brief|architecture_manifest|architecture_baseline|design_system_manifest|design_brief)$" },
+          "additionalProperties": { "$ref": "#/$defs/sha256" }
+        },
+        "gate_input_hashes": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/repositoryPath" },
+          "additionalProperties": { "$ref": "#/$defs/sha256" }
+        },
+        "contract_payload_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      }
+    }
+  }
+}

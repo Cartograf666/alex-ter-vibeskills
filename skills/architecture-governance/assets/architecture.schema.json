@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Cartograf666/alex-ter-vibeskills/schemas/architecture.schema.json",
+  "title": "Project Architecture Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "architecture_style", "automation", "components", "dependency_rules", "architecture_checks", "approval"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "status": { "enum": ["provisional", "approved", "superseded"] },
+    "architecture_style": { "type": "string", "minLength": 2 },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "auto_allow", "ask", "deny"],
+      "properties": {
+        "mode": { "enum": ["manual", "bounded-auto", "full-auto"] },
+        "auto_allow": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "ask": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "deny": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "components": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9._-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/component" }
+    },
+    "dependency_rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/dependencyRule" }
+    },
+    "architecture_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enforcement", "gate_ids"],
+      "properties": {
+        "enforcement": { "enum": ["report-only", "block-new-violations", "changed-modules-strict", "whole-project-strict"] },
+        "gate_ids": { "type": "array", "items": { "type": "string", "pattern": "^GATE-[A-Z0-9][A-Z0-9_-]*$" }, "uniqueItems": true }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "approved_by", "approved_at", "manifest_sha256"],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "invalidated"] },
+        "approved_by": { "type": ["string", "null"] },
+        "approved_at": { "type": ["string", "null"], "format": "date-time" },
+        "manifest_sha256": { "oneOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "approved" } } },
+      "then": {
+        "properties": {
+          "approval": {
+            "properties": {
+              "status": { "const": "approved" },
+              "approved_by": { "type": "string", "minLength": 1 },
+              "approved_at": { "type": "string", "format": "date-time" },
+              "manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "responsibilities", "public_interfaces", "internal_interfaces", "required_gate_ids", "change_approval_class"],
+      "properties": {
+        "paths": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "responsibilities": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "public_interfaces": { "type": "array", "items": { "type": "string" } },
+        "internal_interfaces": { "type": "array", "items": { "type": "string" } },
+        "required_gate_ids": { "type": "array", "items": { "type": "string", "pattern": "^GATE-[A-Z0-9][A-Z0-9_-]*$" } },
+        "change_approval_class": { "enum": ["auto-low-risk", "manager", "human"] }
+      }
+    },
+    "dependencyRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to", "decision"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9_-]*$" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "decision": { "enum": ["allow", "deny", "allow-via-port"] }
+      }
+    }
+  }
+}

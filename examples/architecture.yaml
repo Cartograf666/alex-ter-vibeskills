@@ -1,69 +1,88 @@
 schema_version: 1
-status: approved
-architecture_style: layered
+status: provisional
+architecture_style: layered-modular-monolith
 
 automation:
   mode: bounded-auto
-  auto_allow:
-    - tests
-    - internal_dto
-    - dependency_injection
-    - adapter_mapping
-  ask:
-    - database_schema
-    - public_api
-    - authentication
-    - authorization
-    - external_api_contract
-    - new_dependency
-    - cross_module_dependency
-  deny:
-    - production_deployment
-    - destructive_migration
-    - credential_change
+  auto_allow: [tests, internal_dto, dependency_injection, adapter_mapping]
+  ask: [database_schema, public_api, authentication, authorization, external_api_contract, new_dependency, cross_module_dependency]
+  deny: [production_deployment, destructive_migration, credential_change]
 
-layers:
+components:
   middleware:
     paths: [src/middleware/**]
-    responsibilities: [transport_preprocessing, request_context]
-    may_depend_on: [shared, ports]
-    must_not_depend_on: [controllers, repositories, database]
-
+    responsibilities: [transport preprocessing, request context]
+    public_interfaces: []
+    internal_interfaces: [request_context]
+    required_gate_ids: [GATE-ARCH]
+    change_approval_class: manager
   controllers:
     paths: [src/controllers/**, src/routes/**]
-    responsibilities: [validate_transport_input, call_service, map_response]
-    may_depend_on: [services, contracts, shared]
-    must_not_depend_on: [repositories, database, external_clients]
-
+    responsibilities: [validate transport input, call application services, map responses]
+    public_interfaces: [public_http_api]
+    internal_interfaces: []
+    required_gate_ids: [GATE-ARCH, GATE-CONTRACT]
+    change_approval_class: human
   services:
     paths: [src/services/**]
-    responsibilities: [application_use_cases, business_orchestration, transaction_boundaries]
-    may_depend_on: [domain, repository_ports, external_client_ports, shared]
-    must_not_depend_on: [controllers, middleware]
-
+    responsibilities: [application use cases, business orchestration, transaction boundaries]
+    public_interfaces: []
+    internal_interfaces: [application_service_api]
+    required_gate_ids: [GATE-ARCH, GATE-INTEGRATION]
+    change_approval_class: manager
   repositories:
     paths: [src/repositories/**]
-    responsibilities: [persistence_operations, persistence_mapping]
-    may_depend_on: [domain, database]
-    must_not_depend_on: [controllers, middleware, services, external_clients]
-
+    responsibilities: [persistence operations, persistence mapping]
+    public_interfaces: []
+    internal_interfaces: [repository_ports]
+    required_gate_ids: [GATE-ARCH, GATE-INTEGRATION]
+    change_approval_class: manager
   database:
     paths: [src/db/**, migrations/**]
-    responsibilities: [schema, migrations, database_configuration]
-    approval: ask
-
-  external_clients:
+    responsibilities: [schema, migrations, database configuration]
+    public_interfaces: []
+    internal_interfaces: [database_schema]
+    required_gate_ids: [GATE-ARCH, GATE-INTEGRATION]
+    change_approval_class: human
+  external-clients:
     paths: [src/clients/**, src/integrations/**]
-    responsibilities: [external_protocol, timeouts, retries, response_mapping]
-    may_depend_on: [contracts, shared]
-    must_not_depend_on: [controllers, database]
+    responsibilities: [external protocol, timeouts, retries, response mapping]
+    public_interfaces: []
+    internal_interfaces: [external_client_ports]
+    required_gate_ids: [GATE-ARCH, GATE-CONTRACT]
+    change_approval_class: manager
+  tests:
+    paths: [tests/**]
+    responsibilities: [acceptance and regression verification]
+    public_interfaces: []
+    internal_interfaces: []
+    required_gate_ids: [GATE-ARCH, GATE-CONTRACT, GATE-INTEGRATION]
+    change_approval_class: auto-low-risk
+
+dependency_rules:
+  - id: ARCH-CONTROLLER-NO-DATABASE
+    from: controllers
+    to: database
+    decision: deny
+  - id: ARCH-MIDDLEWARE-NO-REPOSITORY
+    from: middleware
+    to: repositories
+    decision: deny
+  - id: ARCH-SERVICE-CLIENT-PORT
+    from: services
+    to: external-clients
+    decision: allow-via-port
+  - id: ARCH-REPOSITORY-NO-SERVICE
+    from: repositories
+    to: services
+    decision: deny
 
 architecture_checks:
   enforcement: block-new-violations
-  commands:
-    - npm run architecture:test
-    - npm run dependency:cycles
+  gate_ids: [GATE-ARCH]
 
 approval:
-  approved_by: user
-  approved_at: 2026-07-16
+  status: pending
+  approved_by: null
+  approved_at: null
+  manifest_sha256: null

@@ -21,6 +21,8 @@ Discover commands from repository evidence in this order:
 
 Do not invent a command and report it as the project's official gate.
 
+Repository evidence is not automatically trusted. Inspect the resolved command, package lifecycle hooks, and any changed script before execution. List every resolved script, package manifest, lockfile, hook, and configuration file in the gate's `resolved_input_paths`; approval freezes their hashes and each gate result rebinds them to its Git revision. Never execute gate code from `.ai/runs/`. Apply the trust, approval, sandbox, network, secrets, and timeout fields from the canonical development contract.
+
 ## Execution order
 
 Run the cheapest high-signal gates first, then broader gates:
@@ -60,6 +62,7 @@ Compare test and configuration changes against the pre-implementation baseline. 
 - adds suppression directives without a documented reason;
 - lowers lint, type, coverage, security, or compiler strictness;
 - changes snapshots without explaining the behavior change.
+- modifies a frozen manager-approved acceptance test or its manifest without a separate tester-owned approval.
 
 Allow legitimate test updates when acceptance behavior intentionally changed, but require the manager to connect each update to a criterion.
 

@@ -1,0 +1,66 @@
+schema_version: 1
+run_id: RUN-WEBHOOK-RETRY-001
+contract_id: WEBHOOK-RETRY-V1
+contract_payload_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+state: PLAN
+terminal_status: none
+base_revision: "1111111111111111111111111111111111111111"
+current_revision: "1111111111111111111111111111111111111111"
+current_tree_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+budgets:
+  tool_calls_used: 7
+  elapsed_minutes: 4.5
+  cost_usd: 0.8
+  implementation_attempts: 0
+  review_rounds: 0
+  active_writers: 0
+  max_observed_parallel_writers: 0
+  limits_exceeded: false
+
+roles:
+  - role: manager
+    provider: anthropic
+    model: opus
+    model_version: explicit-model-id-required-at-runtime
+    context_id: manager-context-001
+    permissions: [read, delegate, safe-shell]
+
+worktrees: []
+
+acceptance_test_manifest:
+  frozen: false
+  frozen_at_state: none
+  owner_context_id: null
+  files: []
+
+acceptance_results: []
+
+gate_results: []
+approvals: []
+
+review:
+  verdict: pending
+  reviewer_context_id: null
+  independence: not-independent
+  reviewed_revision: null
+  reviewed_tree_sha256: null
+  findings_path: null
+  findings_sha256: null
+  review_event_id: null
+  review_hmac_sha256: null
+
+provider_transfers: []
+state_transitions: []
+attestation_key_id: null
+run_attestation:
+  event_id: null
+  actor: null
+  payload_sha256: null
+  hmac_sha256: null
+
+artifacts:
+  task_packets: []
+  failure_packets: []
+  result_packets: []
+  logs: []

@@ -1,0 +1,7 @@
+:root {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --space-1: 0.25rem;
+  --radius-control: 0.5rem;
+  --motion-fast: 120ms;
+}

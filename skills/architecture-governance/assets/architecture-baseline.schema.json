@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Cartograf666/alex-ter-vibeskills/schemas/architecture-baseline.schema.json",
+  "title": "Architecture Violation Baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "source_revision", "known_violations", "policy"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "source_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "known_violations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/violation" }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_exact_baseline", "block_expansion", "block_new_instances"],
+      "properties": {
+        "allow_exact_baseline": { "const": true },
+        "block_expansion": { "const": true },
+        "block_new_instances": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "rule_id", "rule_version", "severity", "source", "target",
+        "edge_kind", "location", "fingerprint", "first_seen_revision", "reason",
+        "policy", "owner", "review_after"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ARCH-DEBT-[1-9][0-9]*$" },
+        "rule_id": { "type": "string", "pattern": "^ARCH-[A-Z0-9][A-Z0-9_-]*$" },
+        "rule_version": { "type": "integer", "minimum": 1 },
+        "severity": { "enum": ["low", "medium", "high", "critical"] },
+        "source": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "edge_kind": { "enum": ["import", "call", "data-access", "network", "type-leak", "responsibility"] },
+        "location": { "type": "string", "minLength": 1 },
+        "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "first_seen_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "reason": { "type": "string", "minLength": 5 },
+        "policy": { "const": "baseline-only" },
+        "owner": { "type": ["string", "null"] },
+        "review_after": { "type": ["string", "null"], "format": "date" }
+      }
+    }
+  }
+}

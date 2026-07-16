@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design System Governance"
+  short_description: "Select, document, and enforce a product design system"
+  default_prompt: "Use $design-system-governance to discover or choose a design system and define verifiable UI rules."

@@ -2,15 +2,8 @@ schema_version: 1
 generated_at: null
 source_revision: null
 
-known_violations:
-  - id: ARCH-DEBT-001
-    rule: example-rule
-    source: src/example/source.ts
-    target: src/example/target.ts
-    reason: Existing dependency recorded during bootstrap
-    policy: baseline-only
-    owner: null
-    review_after: null
+# Add only evidence-derived violations. Never keep example entries in a live baseline.
+known_violations: []
 
 policy:
   allow_exact_baseline: true

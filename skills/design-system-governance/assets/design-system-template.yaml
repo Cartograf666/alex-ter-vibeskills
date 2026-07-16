@@ -1,0 +1,35 @@
+schema_version: 1
+status: provisional
+source:
+  type: adopted
+  name: replace-me
+  version: replace-me
+  official_url: https://example.com/design-system
+  implementation_packages: []
+visual_direction:
+  traits: [restrained, clear, accessible]
+  density: comfortable
+  color_modes: [light, dark]
+  typography_strategy: system-or-licensed-fonts
+  icon_strategy: one-approved-icon-family
+tokens:
+  source_paths: [src/styles/tokens.css]
+  categories: [color, typography, spacing, sizing, radius, border, elevation, motion, breakpoint, z-index]
+components:
+  source: mixed
+  registry_paths: [src/components/ui]
+  documentation_paths: []
+  required_contracts: [variants, sizes, states, accessibility, composition]
+responsive:
+  strategy: mobile-first
+  required_viewports: [mobile, tablet, desktop]
+accessibility:
+  target: WCAG-2.2-AA
+  requirements: [keyboard, focus-visible, semantics, contrast, zoom-reflow, reduced-motion, touch-targets]
+quality_gate_ids: [GATE-DESIGN-TOKENS, GATE-A11Y, GATE-VISUAL]
+approval:
+  status: pending
+  approved_by: null
+  approved_at: null
+  artifact_hashes: {}
+  manifest_sha256: null

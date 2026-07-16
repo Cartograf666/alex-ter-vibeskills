@@ -48,6 +48,17 @@ Select only branches that can change the outcome, design, risk, or scope.
 5. Cross-layer changes
 6. Deployment topology
 
+## Experience and design-system branches
+
+1. Existing approved design system, tokens, component library, or prototype authority
+2. Target platforms, input methods, viewport classes, and host-ecosystem conventions
+3. Product character, information density, brand maturity, and color modes
+4. Reused components versus new patterns or public component APIs
+5. Loading, empty, error, permission, success, destructive, and offline states
+6. Accessibility, keyboard/focus, reduced motion, zoom/reflow, and localization
+
+Explore this branch for user interfaces or generated visual artifacts. If no usable design system exists, hand the selection decision to `design-system-governance` and continue one question at a time. Do not ask visual-preference questions for backend-only work; record design as not applicable.
+
 ## Delivery branches
 
 1. Release boundary

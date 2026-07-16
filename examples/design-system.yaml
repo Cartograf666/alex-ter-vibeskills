@@ -1,0 +1,35 @@
+schema_version: 1
+status: provisional
+source:
+  type: custom
+  name: Project-owned token-first system
+  version: 0.1.0
+  official_url: null
+  implementation_packages: []
+visual_direction:
+  traits: [restrained, clear, accessible]
+  density: comfortable
+  color_modes: [light, dark]
+  typography_strategy: System font stack with documented semantic type scale
+  icon_strategy: One approved outline icon family
+tokens:
+  source_paths: [examples/design-tokens.css]
+  categories: [color, typography, spacing, sizing, radius, border, elevation, motion, breakpoint, z-index]
+components:
+  source: local
+  registry_paths: [examples/ui-components.md]
+  documentation_paths: [examples/ui-components.md]
+  required_contracts: [variants, sizes, states, accessibility, composition, content]
+responsive:
+  strategy: Mobile-first named viewport contracts
+  required_viewports: [mobile, tablet, desktop]
+accessibility:
+  target: WCAG-2.2-AA
+  requirements: [keyboard, focus-visible, semantics, contrast, zoom-reflow, reduced-motion, touch-targets]
+quality_gate_ids: [GATE-DESIGN-TOKENS, GATE-A11Y, GATE-VISUAL]
+approval:
+  status: pending
+  approved_by: null
+  approved_at: null
+  artifact_hashes: {}
+  manifest_sha256: null

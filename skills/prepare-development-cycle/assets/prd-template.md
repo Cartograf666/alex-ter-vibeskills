@@ -29,6 +29,10 @@ Last updated: <date>
 
 <Normal flow, important alternative flows, and failure states.>
 
+## Experience and design constraints
+
+<For UI work: approved design system, visual direction, information density, viewport/input methods, color modes, localization, accessibility target, and required loading/empty/error/permission/success/offline states. Otherwise state not applicable with reason.>
+
 ## Functional requirements
 
 - FR-1: <required behavior>

@@ -15,6 +15,8 @@ Use an explicit architecture manifest as the source of truth. Passing tests does
 - Copy [architecture-template.yaml](assets/architecture-template.yaml) to `.ai/architecture.yaml` when bootstrapping.
 - Copy [baseline-template.yaml](assets/baseline-template.yaml) to `.ai/architecture-baseline.yaml` for existing projects with known violations.
 - Use [architecture-change-request.md](assets/architecture-change-request.md) when implementation needs undeclared scope.
+- Validate manifests with bundled `scripts/validate_architecture.py` and baselines with `scripts/validate_baseline.py`.
+- Before using bundled Python validators in a shell-capable host, install the hash-locked packages with `python3 -m pip install --require-hashes -r requirements.txt`. In prompt-only hosts, disclose that schema and Git-provenance checks were not executed.
 
 ## Select operating mode
 
@@ -42,6 +44,8 @@ Label rules as:
 
 Never present inferred architecture as approved.
 
+Use bundled `scripts/approve_architecture.py` for explicit approval and `scripts/validate_architecture.py` before relying on the manifest. Any payload change invalidates the approval hash and returns the manifest to provisional review.
+
 ## Define architecture boundaries
 
 For each layer or component, define:
@@ -56,6 +60,8 @@ For each layer or component, define:
 - approval policy for changes.
 
 Model the project's actual architecture. Do not force a layered template on event-driven, hexagonal, modular monolith, microservice, frontend, data, or infrastructure projects when another vocabulary fits better.
+
+For frontend projects, keep structural ownership here and visual/component contracts in `design-system-governance`. Architecture defines where shared primitives, feature UI, state, and adapters live; the design system defines tokens, component behavior, accessibility, responsive rules, and visual evidence. Require both approvals when a change affects both boundaries.
 
 ## Govern task scope
 
@@ -89,6 +95,8 @@ Run deterministic checks when possible:
 Use model review for semantic responsibilities that static checks cannot decide. Record exact evidence for every blocker.
 
 For an existing project, block new violations while allowing recorded baseline exceptions. Do not let a baseline exception authorize new copies of the same violation.
+
+Record each exception with stable rule ID and version, severity, normalized edge kind, source, target, precise location, first-seen revision, and deterministic fingerprint. Reject placeholder or evidence-free baseline entries.
 
 ## Update governance artifacts
 
