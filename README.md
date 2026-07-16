@@ -11,7 +11,7 @@ Turn a vague product idea into an approved development contract, bounded impleme
 [![Agent Skills](https://img.shields.io/badge/standard-Agent%20Skills-2563eb)](https://agentskills.io/specification)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 
-[Quick start](#quick-start) · [The five skills](#the-five-skills) · [Installation](#installation) · [How it works](#how-it-works) · [Security](#security-model)
+[Quick start](#quick-start) · [Which skill when](#which-skill-when) · [The five skills](#the-five-skills) · [Installation](#installation) · [Security](#security-model)
 
 </div>
 
@@ -117,6 +117,38 @@ flowchart LR
 ```
 
 Architecture and design-system work are conditional. Backend-only tasks explicitly record design as not applicable; UI tasks cannot be authorized without an approved design-system manifest and Design Brief.
+
+## Which skill when
+
+### New project
+
+1. Run `$grill-requirements` to pressure-test a new, large, or unclear idea. You may skip this for a straightforward project because preparation can invoke the same interview protocol.
+2. Run `$prepare-development-cycle` to create the PRD, Technical Brief, architecture and design inputs, RunSpec, and Change Envelope.
+3. Review and explicitly approve the development contract.
+4. Run `$run-verified-development-loop` to implement, test, repair, and independently review the approved work.
+
+### Existing project
+
+1. Once per project, run `$architecture-governance` in `BOOTSTRAP_EXISTING` mode to document the current architecture and baseline existing violations without refactoring them.
+2. If the project has a UI, run `$design-system-governance` once to discover or approve its design system.
+3. For every feature, fix, or refactor, use the normal task cycle:
+
+```text
+$prepare-development-cycle
+→ answer one missing decision at a time
+→ approve the development contract
+→ $run-verified-development-loop
+→ respond only if a protected or terminal decision needs you
+→ receive the verified result
+```
+
+### Use a governance skill again when
+
+- `$architecture-governance`: implementation needs another layer, a deeper change, a new dependency direction, or a protected-interface change.
+- `$design-system-governance`: UI work needs a new token, primitive, public component API, interaction pattern, or approved visual deviation.
+- `$grill-requirements`: product intent or scope becomes materially unclear before approval.
+
+Do not start `$run-verified-development-loop` until the development contract is approved. During a valid run, ordinary implementation and test failures are repaired automatically within budget; the manager returns to you only for configured interruptions or protected decisions.
 
 ## The five skills
 
