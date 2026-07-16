@@ -1,0 +1,4 @@
+interface:
+  display_name: "Interview Requirements"
+  short_description: "Resolve product and technical decisions one by one"
+  default_prompt: "Use $grill-requirements to stress-test this idea and resolve its important decisions before implementation."

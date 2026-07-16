@@ -1,0 +1,82 @@
+schema_version: 1
+status: provisional
+architecture_style: layered
+
+automation:
+  mode: manual
+  auto_allow:
+    - tests
+    - internal_dto
+    - dependency_injection
+    - generated_types
+  ask:
+    - database_schema
+    - public_api
+    - authentication
+    - authorization
+    - external_api_contract
+    - new_dependency
+    - cross_module_dependency
+  deny:
+    - production_deployment
+    - destructive_migration
+    - credential_change
+
+layers:
+  controllers:
+    paths:
+      - src/controllers/**
+    responsibilities:
+      - validate_transport_input
+      - call_application_service
+      - map_transport_response
+    may_depend_on:
+      - services
+      - contracts
+    must_not_depend_on:
+      - database
+      - repositories
+    required_checks:
+      - contract_tests
+
+  services:
+    paths:
+      - src/services/**
+    responsibilities:
+      - application_use_cases
+      - business_orchestration
+      - transaction_boundaries
+    may_depend_on:
+      - domain
+      - repository_ports
+      - external_client_ports
+    must_not_depend_on:
+      - controllers
+      - middleware
+    required_checks:
+      - unit_tests
+      - integration_tests
+
+  repositories:
+    paths:
+      - src/repositories/**
+    responsibilities:
+      - persistence_operations
+      - persistence_mapping
+    may_depend_on:
+      - domain
+      - database
+    must_not_depend_on:
+      - controllers
+      - middleware
+      - external_clients
+    required_checks:
+      - repository_tests
+
+architecture_checks:
+  enforcement: block-new-violations
+  commands: []
+
+approval:
+  approved_by: null
+  approved_at: null

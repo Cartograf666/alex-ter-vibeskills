@@ -1,0 +1,69 @@
+schema_version: 1
+status: approved
+architecture_style: layered
+
+automation:
+  mode: bounded-auto
+  auto_allow:
+    - tests
+    - internal_dto
+    - dependency_injection
+    - adapter_mapping
+  ask:
+    - database_schema
+    - public_api
+    - authentication
+    - authorization
+    - external_api_contract
+    - new_dependency
+    - cross_module_dependency
+  deny:
+    - production_deployment
+    - destructive_migration
+    - credential_change
+
+layers:
+  middleware:
+    paths: [src/middleware/**]
+    responsibilities: [transport_preprocessing, request_context]
+    may_depend_on: [shared, ports]
+    must_not_depend_on: [controllers, repositories, database]
+
+  controllers:
+    paths: [src/controllers/**, src/routes/**]
+    responsibilities: [validate_transport_input, call_service, map_response]
+    may_depend_on: [services, contracts, shared]
+    must_not_depend_on: [repositories, database, external_clients]
+
+  services:
+    paths: [src/services/**]
+    responsibilities: [application_use_cases, business_orchestration, transaction_boundaries]
+    may_depend_on: [domain, repository_ports, external_client_ports, shared]
+    must_not_depend_on: [controllers, middleware]
+
+  repositories:
+    paths: [src/repositories/**]
+    responsibilities: [persistence_operations, persistence_mapping]
+    may_depend_on: [domain, database]
+    must_not_depend_on: [controllers, middleware, services, external_clients]
+
+  database:
+    paths: [src/db/**, migrations/**]
+    responsibilities: [schema, migrations, database_configuration]
+    approval: ask
+
+  external_clients:
+    paths: [src/clients/**, src/integrations/**]
+    responsibilities: [external_protocol, timeouts, retries, response_mapping]
+    may_depend_on: [contracts, shared]
+    must_not_depend_on: [controllers, database]
+
+architecture_checks:
+  enforcement: block-new-violations
+  commands:
+    - npm run architecture:test
+    - npm run dependency:cycles
+
+approval:
+  approved_by: user
+  approved_at: 2026-07-16

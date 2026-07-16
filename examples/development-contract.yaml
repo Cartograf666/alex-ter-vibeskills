@@ -1,0 +1,65 @@
+schema_version: 1
+status: approved
+implementation_authorized: true
+document_depth: COMPACT_PRD
+
+source_documents:
+  prd: .ai/specs/webhook-retry/PRD.md
+  technical_brief: .ai/specs/webhook-retry/TECHNICAL-BRIEF.md
+  architecture_manifest: .ai/architecture.yaml
+  architecture_baseline: .ai/architecture-baseline.yaml
+
+run_spec:
+  objective: Retry webhook delivery after temporary receiver failures
+  non_goals:
+    - Change the public webhook API
+  acceptance_criteria:
+    - id: AC-1
+      statement: Temporary receiver failures are retried with bounded backoff
+      verification: Integration test for retry schedule and terminal outcome
+  constraints:
+    - Preserve existing delivery semantics for successful requests
+  verification_expectations:
+    - npm run architecture:test
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run build
+  human_approval_required_for:
+    - database schema changes
+
+change_envelope:
+  primary_layer: services
+  allowed_layers:
+    services:
+      reason: Retry orchestration
+      depth: full
+    external_clients:
+      reason: Classify transport failures
+      depth: methods-only
+    repositories:
+      reason: Persist existing retry state
+      depth: methods-only
+    tests:
+      reason: Acceptance coverage
+      depth: full
+  conditional_layers:
+    database:
+      condition: Existing schema cannot persist retry state
+      approval: ask
+  forbidden_layers:
+    - middleware
+  protected_interfaces:
+    - public_webhook_api
+  architecture_acceptance:
+    - Retry policy remains in the service layer
+    - External protocol handling remains in the client adapter
+
+automation:
+  mode: bounded-auto
+  max_implementation_attempts: 3
+  max_review_rounds: 2
+
+approval:
+  approved_by: user
+  approved_at: 2026-07-16

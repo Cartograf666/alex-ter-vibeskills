@@ -1,0 +1,18 @@
+schema_version: 1
+generated_at: null
+source_revision: null
+
+known_violations:
+  - id: ARCH-DEBT-001
+    rule: example-rule
+    source: src/example/source.ts
+    target: src/example/target.ts
+    reason: Existing dependency recorded during bootstrap
+    policy: baseline-only
+    owner: null
+    review_after: null
+
+policy:
+  allow_exact_baseline: true
+  block_expansion: true
+  block_new_instances: true
