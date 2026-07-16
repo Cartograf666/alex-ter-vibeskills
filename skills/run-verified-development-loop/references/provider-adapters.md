@@ -7,8 +7,7 @@ These adapters describe integration contracts. Installing the skill does not aut
 - Portable layout
 - Claude Code
 - Gemini CLI
-- ChatGPT
-- Codex
+- OpenAI Codex surfaces
 - Cross-provider controller
 
 ## Portable layout
@@ -75,7 +74,7 @@ Install for the current user:
 ~/.gemini/skills/run-verified-development-loop/
 ```
 
-Gemini also recognizes `.agents/skills/` as a portable alias. Refresh discovery with `/skills reload` when necessary. For automated worker calls, use headless structured output and sandboxing. Conceptually:
+Refresh discovery with `/skills reload` when necessary. For automated worker calls, use headless structured output and sandboxing. Conceptually:
 
 ```bash
 gemini --sandbox --model MODEL \
@@ -87,9 +86,13 @@ Parse the terminal exit code and final structured event. Treat model text as a R
 
 Enable the strongest available sandbox and policy rules. Headless operation must not imply automatic approval of untrusted commands.
 
-## ChatGPT
+## OpenAI Codex surfaces
 
-When ChatGPT Skills are enabled, upload the packaged skill from the Skills interface. Keep all reference files in the package. Use the default prompt or say:
+Treat local Codex discovery and the Skills UI in ChatGPT as two delivery surfaces for the same OpenAI skill. The workflow, schemas, supporting files, and model roles do not change between them.
+
+### Skills UI delivery
+
+When the OpenAI Skills UI is enabled in ChatGPT, upload the packaged skill from the Skills interface. Keep all reference files in the package. Use the default prompt or say:
 
 ```text
 Use $run-verified-development-loop to implement this request.
@@ -98,11 +101,11 @@ Act as the sole manager and use connected coding agents as bounded workers.
 
 If Skills are unavailable, create a project or custom GPT, place the core manager instructions from `SKILL.md` in its instructions, and upload the files under `references/` as knowledge. This fallback provides the workflow but does not itself grant repository, shell, Claude, or Gemini access.
 
-For API orchestration, expose external coding workers as bounded tools. Prefer manager-style agent-as-tool calls over conversation handoffs because the ChatGPT/OpenAI manager must retain the state machine and final acceptance decision.
+For API orchestration, expose external coding workers as bounded tools. Prefer manager-style agent-as-tool calls over conversation handoffs because the OpenAI manager must retain the state machine and final acceptance decision.
 
 Use durable human-in-the-loop interruptions for protected calls and tracing for tool, handoff, and approval evidence. Keep secrets out of serialized run context.
 
-## Codex
+### Local Codex delivery
 
 Install for one project using the shared agent-skills directory when supported:
 
@@ -113,7 +116,7 @@ Install for one project using the shared agent-skills directory when supported:
 Install for the current Codex user:
 
 ```text
-~/.codex/skills/run-verified-development-loop/
+~/.agents/skills/run-verified-development-loop/
 ```
 
 Invoke with `$run-verified-development-loop`. The `agents/openai.yaml` file supplies the user-facing name and default prompt. Let Codex call external providers only through tools or CLIs that are actually installed and authorized.

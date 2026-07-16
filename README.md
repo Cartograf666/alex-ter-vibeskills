@@ -4,7 +4,7 @@
 
 **PRD-first, architecture-aware, design-system-aware workflows for reliable AI-assisted development.**
 
-Turn a vague product idea into an approved development contract, bounded implementation, reproducible verification, and an auditable result—across Claude, Codex, Gemini, and ChatGPT.
+Turn a vague product idea into an approved development contract, bounded implementation, reproducible verification, and an auditable result—across Claude, Gemini, and OpenAI Codex environments.
 
 [![Validate](https://github.com/Cartograf666/alex-ter-vibeskills/actions/workflows/validate.yml/badge.svg)](https://github.com/Cartograf666/alex-ter-vibeskills/actions/workflows/validate.yml)
 [![Version](https://img.shields.io/badge/version-0.1.0--alpha.1-7c3aed)](VERSION)
@@ -45,7 +45,7 @@ python3 scripts/package_skills.py --check
 Install for one local agent and every project:
 
 ```bash
-# Codex
+# OpenAI Codex — local installation
 python3 scripts/install_skills.py --target codex --scope user
 
 # Claude Code
@@ -61,7 +61,7 @@ Or install for all three local CLIs:
 python3 scripts/install_skills.py --target all --scope user
 ```
 
-For ChatGPT, upload the five `.skill` archives from [`packages/`](packages/) through **Profile → Skills → Create → Upload from your computer**.
+For the OpenAI Skills UI in ChatGPT, upload the same five `.skill` archives from [`packages/`](packages/) through **Profile → Skills → Create → Upload from your computer**. This is another delivery surface for the same OpenAI/Codex skill format, not a separate implementation of this toolkit.
 
 See the [complete installation guide](docs/INSTALLATION.md) for project-scoped installation, platform paths, updates, dependencies, verification, and troubleshooting.
 
@@ -136,9 +136,9 @@ All skills follow the open [Agent Skills specification](https://agentskills.io/s
 | Host | Project scope | User scope | Recommended installation |
 |---|---|---|---|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `--target claude` |
-| Codex | `.agents/skills/` | `~/.agents/skills/` | `--target codex` |
+| OpenAI Codex — local CLI, IDE, or repository | `.agents/skills/` | `~/.agents/skills/` | `--target codex` |
+| OpenAI Skills UI in ChatGPT | Upload `.skill` archives | Managed in the Skills UI | Upload from `packages/` |
 | Gemini CLI 0.26+ | `.gemini/skills/` | `~/.gemini/skills/` | `--target gemini` |
-| ChatGPT Skills | Upload `.skill` archives | Managed in ChatGPT | Upload from `packages/` |
 
 Install into a specific repository instead of your user profile:
 
@@ -235,7 +235,7 @@ Component foundation and visual direction are separate decisions. A visual trend
 The workflow is provider-neutral. A typical routing policy is:
 
 ```yaml
-manager: Fable, Opus, or a strong ChatGPT reasoning model
+manager: Fable, Opus, or a strong OpenAI reasoning model in Codex
 writer: Sonnet, Gemini coding model, or Codex
 tester: Haiku or another fast model
 reviewer: fresh context, preferably another model family
@@ -300,7 +300,7 @@ scripts/      validators, approval tools, installer, and package builder
 tests/        positive and adversarial regression tests
 evals/        workflow-level adversarial cases
 examples/     complete example artifacts and starter prompts
-packages/     deterministic ChatGPT-compatible .skill archives
+packages/     deterministic .skill archives for the OpenAI Skills UI
 docs/         installation and repository hardening guides
 ```
 

@@ -8,7 +8,7 @@ You need:
 
 - Git;
 - Python 3.9 or newer for the installer and bundled validators;
-- at least one supported agent host: Claude Code, Codex, Gemini CLI, or ChatGPT Skills.
+- at least one supported agent host: Claude Code, Gemini CLI, or an OpenAI Codex environment.
 
 The workflow can describe cross-provider routing, but this repository does not provide provider credentials or a cross-provider transport runtime.
 
@@ -49,7 +49,11 @@ python3 scripts/install_skills.py --target claude --scope user
 
 Claude Code discovers project skills from `.claude/skills/` and personal skills from `~/.claude/skills/`. Restart Claude Code only if a newly created top-level skills directory is not detected in the current session.
 
-## Install for Codex
+## Install for OpenAI Codex
+
+OpenAI uses the same Agent Skills format across Codex surfaces. Choose local discovery for Codex CLI, IDE, desktop projects, and repositories, or upload the packaged archive through the Skills UI available in ChatGPT. These are two delivery paths for the same skills.
+
+### Local Codex installation
 
 Install into the current repository:
 
@@ -67,6 +71,18 @@ python3 scripts/install_skills.py --target codex --scope user
 ```
 
 Codex discovers repository skills from `.agents/skills/` between the working directory and repository root, and personal skills from `~/.agents/skills/`.
+
+### OpenAI Skills UI
+
+The Skills UI uses the reproducible archives under `packages/`:
+
+1. Open your profile menu in ChatGPT.
+2. Select **Skills**.
+3. Select **Create**, then **Upload from your computer**.
+4. Upload each `.skill` file from `packages/`.
+5. Review the scan result before enabling the skill.
+
+Skills UI availability depends on your plan and workspace settings. OpenAI scans uploaded skills, but that scan does not replace your own source and security review.
 
 ## Install for Gemini CLI
 
@@ -89,25 +105,13 @@ Gemini CLI discovers workspace skills from `.gemini/skills/` and personal skills
 
 ## Install for every local CLI
 
-Install personal copies for Claude Code, Codex, and Gemini CLI at once:
+Install personal copies for Claude Code, local Codex environments, and Gemini CLI at once:
 
 ```bash
 python3 scripts/install_skills.py --target all --scope user
 ```
 
 The installer refuses to replace an existing skill directory. Review changes first, then add `--force` when you intentionally want to update an installation.
-
-## Install in ChatGPT
-
-ChatGPT uses the reproducible archives under `packages/`:
-
-1. Open your profile menu in ChatGPT.
-2. Select **Skills**.
-3. Select **Create**, then **Upload from your computer**.
-4. Upload each `.skill` file from `packages/`.
-5. Review the scan result before enabling the skill.
-
-Personal Skills availability depends on your ChatGPT plan and workspace settings. ChatGPT scans uploaded skills, but that scan does not replace your own source and security review.
 
 ## Install validator dependencies
 
@@ -162,7 +166,7 @@ This is intentional. Compare the installed directory with the reviewed source. U
 ## Official host documentation
 
 - [Claude Code skills](https://code.claude.com/docs/en/skills)
-- [Codex skills](https://developers.openai.com/codex/skills/)
+- [OpenAI Codex skills](https://developers.openai.com/codex/skills/)
 - [Gemini CLI Agent Skills announcement](https://github.com/google-gemini/gemini-cli/discussions/17790)
-- [ChatGPT Skills](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
+- [OpenAI Skills UI in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
 - [Agent Skills specification](https://agentskills.io/specification)

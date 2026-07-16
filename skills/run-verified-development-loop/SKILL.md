@@ -1,6 +1,6 @@
 ---
 name: run-verified-development-loop
-description: Execute an approved PRD and development contract through bounded multi-model implementation cycles with architecture-aware work packages, isolated worktrees, separate coding and testing roles, deterministic architecture and quality gates, repair limits, and independent review. Use when the user asks to implement approved work automatically with an orchestrator such as Fable, Opus, or ChatGPT; workers such as Sonnet or Gemini; testers such as Haiku; or explicit requirements that the result be structurally clean, tested, and working.
+description: Execute an approved PRD and development contract through bounded multi-model implementation cycles with architecture-aware work packages, isolated worktrees, separate coding and testing roles, deterministic architecture and quality gates, repair limits, and independent review. Use when the user asks to implement approved work automatically with an orchestrator such as Fable, Opus, or OpenAI Codex; workers such as Sonnet, Gemini, or Codex; testers such as Haiku; or explicit requirements that the result be structurally clean, tested, and working.
 ---
 
 # Run a Verified Development Loop
@@ -16,7 +16,7 @@ Read only the references needed for the current run:
 - Read [quality-gates.md](references/quality-gates.md) before implementing or verifying changes.
 - Read [architecture-integration.md](references/architecture-integration.md) when a PRD, architecture manifest, baseline, or Change Envelope exists.
 - Read [design-system-integration.md](references/design-system-integration.md) for any UI or generated visual artifact.
-- Read [provider-adapters.md](references/provider-adapters.md) when configuring Claude, Gemini, ChatGPT, Codex, or cross-provider execution.
+- Read [provider-adapters.md](references/provider-adapters.md) when configuring Claude, Gemini, OpenAI Codex surfaces, or cross-provider execution.
 - Read [prompt-library.md](references/prompt-library.md) when constructing prompts for an external worker or reviewer.
 - Read [security-boundaries.md](references/security-boundaries.md) before executing repository commands or sending code to another provider.
 - Validate inputs with bundled schemas and scripts before starting implementation.

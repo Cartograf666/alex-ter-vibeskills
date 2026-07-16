@@ -31,10 +31,10 @@ Treat model names as defaults, not hard requirements:
 
 | Work type | Preferred model class | Suggested models |
 |---|---|---|
-| Long-horizon orchestration, architectural judgment | Highest reasoning tier | Fable, Opus, strong ChatGPT reasoning model |
+| Long-horizon orchestration, architectural judgment | Highest reasoning tier | Fable, Opus, strong OpenAI reasoning model in Codex |
 | Normal feature work, fixes, local refactors | Strong coding tier | Sonnet, Gemini coding model, Codex coding model |
 | Repository discovery, test execution, mechanical checks | Fast low-cost tier | Haiku, Flash/mini equivalent |
-| Independent critique | Different context and preferably different model family | ChatGPT when Claude writes; Opus when Gemini writes; Gemini when OpenAI writes |
+| Independent critique | Different context and preferably different model family | OpenAI/Codex when Claude writes; Opus when Gemini writes; Gemini when OpenAI writes |
 
 Do not route by brand alone. Route by task difficulty, tool access, context size, latency, cost, and prior failures.
 
