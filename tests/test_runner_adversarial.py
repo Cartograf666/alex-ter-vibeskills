@@ -296,9 +296,9 @@ class TestRunnerAdversarial(unittest.TestCase):
         stage_record = self.repo / f".ai/runs/{run_id}.yaml.stage"
         stage_dir = self.repo / f".ai/runs/{run_id}.stage"
         stage_record.parent.mkdir(parents=True, exist_ok=True)
-        stage_record.write_text("leftover staging record", encoding="utf-8")
+        stage_record.write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
         stage_dir.mkdir(parents=True, exist_ok=True)
-        (stage_dir / "events.jsonl").write_text("leftover event", encoding="utf-8")
+        (stage_dir / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
 
         # Now, call init_run. It should clean them up and succeed!
         self.init_valid_run(run_id)
@@ -441,3 +441,167 @@ class TestRunnerAdversarial(unittest.TestCase):
 
         finally:
             target_repo_dir.cleanup()
+
+    def test_run_id_traversal_victim(self) -> None:
+        self.approve_contract()
+        # Verify a run_id containing traversal is rejected
+        run_id = "../../victim"
+
+        # Create a sentinel file to prove it is not touched
+        victim_stage = self.repo.parent / "victim.stage"
+        if victim_stage.exists():
+            victim_stage.unlink()
+
+        with self.assertRaises(ValidationError):
+            init_run(
+                repository_path=self.repo,
+                contract_rel_path=".ai/specs/my-slug/development-contract.yaml",
+                run_id=run_id,
+                manager_provider="anthropic",
+                manager_model="opus",
+                manager_model_version="1.0",
+                manager_context_id="ctx-1",
+            )
+
+        self.assertFalse(victim_stage.exists())
+
+    def test_sys_modules_poisoning(self) -> None:
+        self.approve_contract()
+
+        # Poison sys.modules with a fake sentinel object
+        import sys
+        sys.modules["validate_contract"] = object()
+
+        try:
+            # init_run should succeed by bypassing this poisoned module
+            self.init_valid_run("RUN-POISON-SYS-MODULES")
+            self.assertTrue((self.repo / ".ai/runs/RUN-POISON-SYS-MODULES.yaml").is_file())
+        finally:
+            # Clean up sys.modules poisoning
+            if "validate_contract" in sys.modules:
+                del sys.modules["validate_contract"]
+
+    def test_malicious_path_precedence(self) -> None:
+        self.approve_contract()
+
+        # Create a temporary directory and place a poisoned validate_contract.py inside
+        import sys
+        malpath_dir = tempfile.TemporaryDirectory()
+        try:
+            poisoned_script = Path(malpath_dir.name) / "validate_contract.py"
+            poisoned_script.write_text("raise RuntimeError('MALICIOUS PATH EXECUTION')\n", encoding="utf-8")
+
+            # Inject to the front of sys.path
+            sys.path.insert(0, malpath_dir.name)
+
+            try:
+                # init_run should bypass the poisoned path in sys.path
+                self.init_valid_run("RUN-MALPATH-PRECEDENCE")
+                self.assertTrue((self.repo / ".ai/runs/RUN-MALPATH-PRECEDENCE.yaml").is_file())
+            finally:
+                if malpath_dir.name in sys.path:
+                    sys.path.remove(malpath_dir.name)
+        finally:
+            malpath_dir.cleanup()
+
+    def test_disallowed_ledger_prefix(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-DISALLOWED-PREFIX"
+        self.init_valid_run(run_id)
+
+        # Modify run transitions to start with DISCOVER -> SPECIFY instead of START -> DISCOVER
+        record_path = self.repo / f".ai/runs/{run_id}.yaml"
+        record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+        record["state"] = "SPECIFY"
+        record["state_transitions"] = [
+            {"from": "DISCOVER", "to": "SPECIFY", "at": "2026-07-20T12:00:00Z", "reason": "Bypass start"}
+        ]
+        record_path.write_text(yaml.safe_dump(record), encoding="utf-8")
+
+        events_path = self.repo / f".ai/runs/{run_id}/events.jsonl"
+        events_path.write_text(
+            json.dumps({
+                "seq": 1,
+                "event_id": "EVT-1",
+                "type": "state_transition",
+                "actor": "ctx-1",
+                "timestamp": "2026-07-20T12:00:00Z",
+                "data": {"from": "DISCOVER", "to": "SPECIFY", "at": "2026-07-20T12:00:00Z", "reason": "Bypass start"}
+            }) + "\n",
+            encoding="utf-8"
+        )
+
+        with self.assertRaises(ValidationError):
+            resume_run(self.repo, run_id)
+
+    def test_promotion_failures_recovery(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-PROMOTION-FAIL"
+
+        # 1. Simulate Failure between rename 1 and rename 2 (Dir renamed, Record stage left)
+        # We write stage record and final directory.
+        stage_record_path = self.repo / f".ai/runs/{run_id}.yaml.stage"
+        final_dir_path = self.repo / f".ai/runs/{run_id}"
+
+        stage_record_path.parent.mkdir(parents=True, exist_ok=True)
+        final_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Add metadata and stage markers to prove they are managed
+        stage_record_path.write_text(yaml.safe_dump({
+            "run_id": run_id,
+            "contract_id": "my-contract",
+            "contract_payload_sha256": "hash",
+            "state": "DISCOVER",
+            "base_revision": "rev",
+            "current_revision": "rev",
+            "current_tree_sha256": "tree",
+            "roles": [{"role": "manager", "provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-01"}]
+        }), encoding="utf-8")
+
+        (final_dir_path / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        (final_dir_path / "metadata.yaml").write_text(yaml.safe_dump({
+            "run_id": run_id,
+            "contract_id": "my-contract",
+            "manager": {"provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-01"}
+        }), encoding="utf-8")
+
+        # Recovery through resume (allow_rollback = False) should complete the promotion
+        from vibeskills_runner.run_service import check_and_recover_promotion
+        check_and_recover_promotion(self.repo, run_id, allow_rollback=False)
+
+        self.assertTrue((self.repo / f".ai/runs/{run_id}.yaml").is_file())
+        self.assertTrue(final_dir_path.is_dir())
+        self.assertFalse(stage_record_path.exists())
+
+        # Clean up
+        (self.repo / f".ai/runs/{run_id}.yaml").unlink()
+        shutil.rmtree(final_dir_path)
+
+        # 2. Simulate same failure, but init_run (allow_rollback = True) should clean/rollback
+        stage_record_path.write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        final_dir_path.mkdir(parents=True, exist_ok=True)
+        (final_dir_path / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        (final_dir_path / "metadata.yaml").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+
+        check_and_recover_promotion(self.repo, run_id, allow_rollback=True)
+        self.assertFalse(stage_record_path.exists())
+        self.assertFalse(final_dir_path.exists())
+
+    def test_dirty_tree_validation(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-DIRTY-TREE"
+        self.init_valid_run(run_id)
+
+        # Create an untracked file outside .ai/runs/ to make tree dirty
+        dirty_file = self.repo / "uncommitted_file.txt"
+        dirty_file.write_text("uncommitted content", encoding="utf-8")
+
+        # resume should fail because repository has uncommitted changes
+        with self.assertRaises(ValidationError):
+            resume_run(self.repo, run_id)
+
+        # Clean the dirty file
+        dirty_file.unlink()
+
+        # resume should succeed now
+        resume_run(self.repo, run_id)

@@ -69,8 +69,8 @@ class TestRunnerPersistence(unittest.TestCase):
 
     def test_append_event_success(self) -> None:
         events_path = self.temp_path / "events.jsonl"
-        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester"}
-        event2 = {"seq": 2, "event_id": "EVT-2", "type": "test", "actor": "tester"}
+        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:00:00Z", "data": {}}
+        event2 = {"seq": 2, "event_id": "EVT-2", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:01:00Z", "data": {}}
         append_event(events_path, event1)
         append_event(events_path, event2)
 
@@ -81,16 +81,16 @@ class TestRunnerPersistence(unittest.TestCase):
 
     def test_append_event_out_of_sequence(self) -> None:
         events_path = self.temp_path / "events.jsonl"
-        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester"}
-        event3 = {"seq": 3, "event_id": "EVT-3", "type": "test", "actor": "tester"}
+        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:00:00Z", "data": {}}
+        event3 = {"seq": 3, "event_id": "EVT-3", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:02:00Z", "data": {}}
         append_event(events_path, event1)
         with self.assertRaises(PersistenceError):
             append_event(events_path, event3)
 
     def test_append_event_duplicate_id(self) -> None:
         events_path = self.temp_path / "events.jsonl"
-        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester"}
-        event2 = {"seq": 2, "event_id": "EVT-1", "type": "test", "actor": "tester"}  # duplicate ID
+        event1 = {"seq": 1, "event_id": "EVT-1", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:00:00Z", "data": {}}
+        event2 = {"seq": 2, "event_id": "EVT-1", "type": "test", "actor": "tester", "timestamp": "2026-07-20T12:01:00Z", "data": {}}  # duplicate ID
         append_event(events_path, event1)
         with self.assertRaises(PersistenceError):
             append_event(events_path, event2)

@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import tempfile
+import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -8,6 +10,40 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
 from .errors import PersistenceError, ValidationError
+
+RUN_ID_PATTERN = re.compile(r"^RUN-[A-Z0-9][A-Z0-9._-]*$")
+
+
+def validate_run_id(run_id: str) -> None:
+    """Validate that the run ID matches the strict canonical pattern."""
+    if not isinstance(run_id, str):
+        raise ValidationError("run_id must be a string")
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValidationError(f"Invalid run_id format: '{run_id}'")
+
+
+def verify_runs_path_confinement(resolved_path: Path, repository: Path) -> None:
+    """Ensure that the resolved path lies strictly inside <repository>/.ai/runs/."""
+    runs_dir = (repository / ".ai/runs").resolve()
+    resolved_abs = resolved_path.resolve()
+    try:
+        resolved_abs.relative_to(runs_dir)
+    except ValueError as exc:
+        raise ValidationError(
+            f"Access denied: Path '{resolved_path}' is not within '{runs_dir}'"
+        ) from exc
+
+
+def validate_rfc3339(timestamp: str) -> bool:
+    """Validate if the string is a valid RFC3339 timestamp."""
+    if not isinstance(timestamp, str):
+        return False
+    try:
+        t = timestamp.replace("Z", "+00:00")
+        dt.datetime.fromisoformat(t)
+        return True
+    except Exception:
+        return False
 
 
 def resolve_safe_path(base_dir: Path, relative_path_str: str) -> Path:
@@ -79,7 +115,7 @@ def save_yaml_atomic(path: Path, data: Dict[str, Any], schema_path: Path) -> Non
 
 
 def load_events(path: Path) -> List[Dict[str, Any]]:
-    """Load and validate the append-only event journal from JSONL format."""
+    """Load, validate, and perform structural checks on the event journal."""
     if not path.is_file():
         return []
     events = []
@@ -103,27 +139,75 @@ def load_events(path: Path) -> List[Dict[str, Any]]:
     except OSError as exc:
         raise PersistenceError(f"OS error reading event journal {path}: {exc}") from exc
 
-    # Validate monotonic sequence numbers and event ID uniqueness
+    # Structural validation of event objects and journal monotonicity
     seen_ids = set()
     last_seq = 0
+    last_ts = None
     for idx, event in enumerate(events):
         seq = event.get("seq")
         evt_id = event.get("event_id")
-        if seq is None or not isinstance(seq, int):
+        etype = event.get("type")
+        actor = event.get("actor")
+        timestamp = event.get("timestamp")
+        data = event.get("data")
+
+        if seq is None or not isinstance(seq, int) or seq <= 0:
             raise PersistenceError(
                 f"Missing or invalid sequence number in event at index {idx}"
             )
-        if evt_id is None or not isinstance(evt_id, str):
+        if evt_id is None or not isinstance(evt_id, str) or not evt_id:
             raise PersistenceError(
                 f"Missing or invalid event ID in event at index {idx}"
             )
+        if etype is None or not isinstance(etype, str) or not etype:
+            raise PersistenceError(
+                f"Missing or invalid type in event at index {idx}"
+            )
+        if actor is None or not isinstance(actor, str) or not actor:
+            raise PersistenceError(
+                f"Missing or invalid actor in event at index {idx}"
+            )
+        if timestamp is None or not isinstance(timestamp, str) or not validate_rfc3339(timestamp):
+            raise PersistenceError(
+                f"Missing or invalid RFC3339 timestamp in event at index {idx}: {timestamp}"
+            )
+        if data is None or not isinstance(data, dict):
+            raise PersistenceError(
+                f"Missing or invalid data payload in event at index {idx}"
+            )
 
+        # Monotonicity check of sequence numbers
         if seq != last_seq + 1:
             raise PersistenceError(
                 f"Event sequence number is not monotonic: expected {last_seq + 1}, got {seq}"
             )
+        # Duplicate check of event IDs
         if evt_id in seen_ids:
             raise PersistenceError(f"Duplicate event ID in journal: {evt_id}")
+
+        # Monotonicity check of event timestamps
+        current_dt = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if last_ts is not None:
+            if current_dt < last_ts:
+                raise PersistenceError(
+                    f"Journal event timestamps are not monotonic: {timestamp} is earlier than previous."
+                )
+        last_ts = current_dt
+
+        # Structural check for state transition type
+        if etype == "state_transition":
+            from_state = data.get("from")
+            to_state = data.get("to")
+            at_ts = data.get("at")
+            reason = data.get("reason")
+            if not isinstance(from_state, str) or not from_state:
+                raise PersistenceError(f"Invalid from_state in transition event at index {idx}")
+            if not isinstance(to_state, str) or not to_state:
+                raise PersistenceError(f"Invalid to_state in transition event at index {idx}")
+            if not isinstance(at_ts, str) or not validate_rfc3339(at_ts):
+                raise PersistenceError(f"Invalid at timestamp in transition event at index {idx}: {at_ts}")
+            if not isinstance(reason, str) or not reason:
+                raise PersistenceError(f"Invalid reason in transition event at index {idx}")
 
         seen_ids.add(evt_id)
         last_seq = seq
@@ -147,6 +231,16 @@ def append_event(path: Path, event: Dict[str, Any]) -> None:
         raise PersistenceError("New event must have an event_id")
     if any(e.get("event_id") == new_id for e in existing_events):
         raise PersistenceError(f"Event ID {new_id} already exists in the journal")
+
+    # Validate structure of the new event before writing
+    temp_events = existing_events + [event]
+    # We can write temp_events to a temp file and load it using load_events to structurally validate it
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_file = Path(tmpdir) / "test_events.jsonl"
+        with tmp_file.open("w", encoding="utf-8") as f:
+            for ev in temp_events:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        load_events(tmp_file)  # Will raise if invalid
 
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
