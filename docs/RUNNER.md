@@ -38,7 +38,7 @@ The kernel mitigates several attack vectors:
 | **Path Traversal** | Malicious paths (e.g. `../../etc/passwd` or outside the repo) are supplied via flags or contract inputs to read/write system files. | All target file paths are resolved using `resolve_safe_path` which strictly validates that resolved paths do not escape the repository root. |
 | **Interrupted Initialization** | An initialization process is cut short (e.g., due to power loss or write failure), leaving incomplete run record files that block the run ID. | Staging is used: all files are created under `.stage` suffixes and promoted only after full verification. Existing staging files are cleaned up on a retry. |
 | **Forged State Transitions** | A malicious agent directly edits `.ai/runs/<run-id>.yaml` to force a jump in the state machine (e.g., `START -> PLAN` or `ACCEPT -> ESCALATE`). | The state machine transition rules are strictly checked. In addition, the record's transitions ledger is compared 1-to-1 (including timestamps, actions, and reasons) with the event journal. |
-| **Mismatched Revisions** | An agent makes changes without committing, or checks out a different branch, which is then verified against the wrong state. | The `resume` command strictly checks that the recorded `current_revision` matches repository HEAD, that the `base_revision` is a valid ancestor of HEAD, and that the `current_tree_sha256` matches the actual committed tree SHA. |
+| **Mismatched Revisions** | An agent makes changes without committing, or checks out a different branch, which is then verified against the wrong state. | The `resume` command checks that the recorded `current_revision` matches repository HEAD, that the `base_revision` is a valid ancestor of HEAD, and that the `current_tree_sha256` matches the actual committed tree SHA. It also enforces that the repository worktree has no uncommitted changes (dirty tree) outside of `.ai/runs/`. |
 
 ---
 
@@ -66,6 +66,10 @@ The runner has explicit unit and integration tests proving rejection of:
 11. **Interrupted staging recovery** (correct cleanup and successful re-initialization).
 12. **Target repository scripts intrusion** (verifying that target repository's custom validation scripts are completely ignored and not executed).
 13. **Target repository missing toolkit files** (verifying that the runner works correctly even if the target repository has no `scripts/` or `schemas/` directory).
+14. **Path Traversal run ID** (e.g. `../../victim` to escape `.ai/runs/` is rejected).
+15. **Disallowed transition ledger start** (transitions not starting with `START -> DISCOVER` are rejected).
+16. **Interrupted promotion recovery** (fault injection of Step 1 / Step 2 renames fails, successfully recovered or rolled back).
+17. **Dirty worktree status** (uncommitted files outside `.ai/runs/` trigger validation failure).
 
 ---
 
