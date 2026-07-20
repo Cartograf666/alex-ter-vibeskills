@@ -1,10 +1,12 @@
 import datetime as dt
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -14,6 +16,8 @@ from .git_state import (
     get_git_head,
     get_repo_root,
     is_git_repo,
+    git_object_exists,
+    git_is_ancestor,
 )
 from .models import create_event, create_initial_run_record
 from .persistence import (
@@ -24,12 +28,18 @@ from .persistence import (
     save_yaml_atomic,
     validate_against_schema,
 )
+from .state_machine import check_transition, get_allowed_next_states
+
+# Trusted location of schemas and scripts
+TRUSTED_ROOT = Path(__file__).resolve().parents[1]
+TRUSTED_SCHEMAS_DIR = TRUSTED_ROOT / "schemas"
+TRUSTED_SCRIPTS_DIR = TRUSTED_ROOT / "scripts"
 
 
 def validate_contract_helper(
-    contract_path: Path, repository: Path, schema_path: Path
+    contract_path: Path, repository: Path
 ) -> Dict[str, Any]:
-    """Validate a contract using the project's existing validator script."""
+    """Validate a contract using the trusted scripts and schemas."""
     if not contract_path.is_file():
         raise ValidationError(f"Contract file not found: {contract_path}")
 
@@ -41,8 +51,8 @@ def validate_contract_helper(
     if not isinstance(contract, dict):
         raise ValidationError("Contract must be a YAML mapping")
 
-    # Add scripts to sys.path to load validate_contract
-    scripts_path = str(repository / "scripts")
+    # Add trusted scripts to sys.path
+    scripts_path = str(TRUSTED_SCRIPTS_DIR)
     sys_path_added = False
     if scripts_path not in sys.path:
         sys.path.insert(0, scripts_path)
@@ -52,6 +62,7 @@ def validate_contract_helper(
         from validate_contract import validate_semantics
         from jsonschema import Draft202012Validator, FormatChecker
 
+        schema_path = TRUSTED_SCHEMAS_DIR / "development-contract.schema.json"
         if not schema_path.is_file():
             raise ValidationError(f"Contract schema not found: {schema_path}")
 
@@ -78,7 +89,7 @@ def validate_contract_helper(
         if sys_path_added:
             sys.path.pop(0)
 
-    # Extra contract sanity checks requested by task
+    # Extra contract sanity checks
     if contract.get("status") != "approved":
         raise ValidationError(f"Contract status must be 'approved', got '{contract.get('status')}'")
     if contract.get("implementation_authorized") is not True:
@@ -91,8 +102,8 @@ def find_contract_by_id(repository: Path, contract_id: str, payload_hash: str) -
     """Find the development-contract file matching the contract_id and payload hash."""
     specs_dir = repository / ".ai/specs"
     if specs_dir.is_dir():
-        # Import contract_payload_sha256 from contract_lib to compute payload hash
-        scripts_path = str(repository / "scripts")
+        # Import contract_payload_sha256 from trusted scripts
+        scripts_path = str(TRUSTED_SCRIPTS_DIR)
         sys_path_added = False
         if scripts_path not in sys.path:
             sys.path.insert(0, scripts_path)
@@ -126,7 +137,7 @@ def init_run(
     manager_model_version: str,
     manager_context_id: str,
 ) -> None:
-    """Initialize a run record, create the event log, and store metadata."""
+    """Initialize a run record, create the event log, and store metadata using staging/atomic promotion."""
     if not is_git_repo(repository_path):
         raise ValidationError(f"Path is not a Git repository: {repository_path}")
 
@@ -137,89 +148,141 @@ def init_run(
     run_record_path = resolve_safe_path(repo_root, f".ai/runs/{run_id}.yaml")
     run_dir = resolve_safe_path(repo_root, f".ai/runs/{run_id}")
 
-    # Check if run already exists
+    # Check if a completed/final run already exists
     if run_record_path.exists() or run_dir.exists():
         raise ValidationError(f"Run ID '{run_id}' already exists and cannot be re-initialized.")
 
-    # Validate contract
-    contract_schema = repo_root / "schemas/development-contract.schema.json"
-    contract = validate_contract_helper(contract_path, repo_root, contract_schema)
+    # 1. Staging paths
+    stage_record_path = resolve_safe_path(repo_root, f".ai/runs/{run_id}.yaml.stage")
+    stage_dir = resolve_safe_path(repo_root, f".ai/runs/{run_id}.stage")
 
-    # Obtain HEAD and tree hashes
-    head_commit = get_git_head(repo_root)
-    tree_hash = get_committed_tree_sha256(repo_root, head_commit)
+    # Interrupted initialization recovery: clean up any leftover staging files
+    if stage_record_path.exists():
+        try:
+            stage_record_path.unlink()
+        except OSError:
+            pass
+    if stage_dir.exists():
+        try:
+            shutil.rmtree(stage_dir)
+        except OSError:
+            pass
 
-    # Calculate contract payload hash
-    scripts_path = str(repo_root / "scripts")
-    sys_path_added = False
-    if scripts_path not in sys.path:
-        sys.path.insert(0, scripts_path)
-        sys_path_added = True
+    # 2. Staging write block with rollback
     try:
-        from contract_lib import contract_payload_sha256
-        contract_payload_hash = contract_payload_sha256(contract)
-    finally:
-        if sys_path_added:
-            sys.path.pop(0)
+        # Validate contract
+        contract = validate_contract_helper(contract_path, repo_root)
 
-    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    reason = f"Run initialized from contract {contract_path.name} by manager context {manager_context_id}."
+        # Obtain HEAD and tree hashes
+        head_commit = get_git_head(repo_root)
+        tree_hash = get_committed_tree_sha256(repo_root, head_commit)
 
-    # Create run record dict
-    record = create_initial_run_record(
-        run_id=run_id,
-        contract_id=contract.get("contract_id", ""),
-        contract_payload_hash=contract_payload_hash,
-        head_commit=head_commit,
-        tree_hash=tree_hash,
-        manager_provider=manager_provider,
-        manager_model=manager_model,
-        manager_model_version=manager_model_version,
-        manager_context_id=manager_context_id,
-        timestamp=timestamp,
-        reason=reason,
-    )
+        # Calculate contract payload hash using trusted scripts
+        scripts_path = str(TRUSTED_SCRIPTS_DIR)
+        sys_path_added = False
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+            sys_path_added = True
+        try:
+            from contract_lib import contract_payload_sha256
+            contract_payload_hash = contract_payload_sha256(contract)
+        finally:
+            if sys_path_added:
+                sys.path.pop(0)
 
-    # Atomically save run record YAML
-    run_record_schema = repo_root / "schemas/run-record.schema.json"
-    save_yaml_atomic(run_record_path, record, run_record_schema)
+        timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        reason = f"Run initialized from contract {contract_path.name} by manager context {manager_context_id}."
 
-    # Create journal directory and files
-    run_dir.mkdir(parents=True, exist_ok=True)
-    events_path = run_dir / "events.jsonl"
-    metadata_path = run_dir / "metadata.yaml"
+        # Create run record dict
+        record = create_initial_run_record(
+            run_id=run_id,
+            contract_id=contract.get("contract_id", ""),
+            contract_payload_hash=contract_payload_hash,
+            head_commit=head_commit,
+            tree_hash=tree_hash,
+            manager_provider=manager_provider,
+            manager_model=manager_model,
+            manager_model_version=manager_model_version,
+            manager_context_id=manager_context_id,
+            timestamp=timestamp,
+            reason=reason,
+        )
 
-    # Append first event
-    initial_event = create_event(
-        seq=1,
-        event_id=f"EVT-{run_id}-INIT",
-        event_type="state_transition",
-        actor=manager_context_id,
-        data={
-            "from": "START",
-            "to": "DISCOVER",
-            "at": timestamp,
-            "reason": reason,
-        },
-        timestamp=timestamp,
-    )
-    append_event(events_path, initial_event)
+        # Write run record atomically to stage
+        run_record_schema = TRUSTED_SCHEMAS_DIR / "run-record.schema.json"
+        save_yaml_atomic(stage_record_path, record, run_record_schema)
 
-    # Save metadata
-    metadata = {
-        "created_at": timestamp,
-        "run_id": run_id,
-        "contract_id": contract.get("contract_id", ""),
-        "manager": {
-            "provider": manager_provider,
-            "model": manager_model,
-            "model_version": manager_model_version,
-            "context_id": manager_context_id,
-        },
-    }
-    metadata_path.write_text(
-        yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True), encoding="utf-8"
-    )
+        # Create staging run directory
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        stage_events_path = stage_dir / "events.jsonl"
+        stage_metadata_path = stage_dir / "metadata.yaml"
+
+        # Append first event
+        initial_event = create_event(
+            seq=1,
+            event_id=f"EVT-{run_id}-INIT",
+            event_type="state_transition",
+            actor=manager_context_id,
+            data={
+                "from": "START",
+                "to": "DISCOVER",
+                "at": timestamp,
+                "reason": reason,
+            },
+            timestamp=timestamp,
+        )
+        append_event(stage_events_path, initial_event)
+
+        # Save metadata atomically
+        metadata = {
+            "created_at": timestamp,
+            "run_id": run_id,
+            "contract_id": contract.get("contract_id", ""),
+            "manager": {
+                "provider": manager_provider,
+                "model": manager_model,
+                "model_version": manager_model_version,
+                "context_id": manager_context_id,
+            },
+        }
+        temp_fd, temp_path = tempfile.mkstemp(dir=str(stage_dir), suffix=".tmp")
+        try:
+            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+                yaml.safe_dump(metadata, f, sort_keys=False, allow_unicode=True)
+            os.replace(temp_path, stage_metadata_path)
+        except Exception as exc:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            raise exc
+
+        # 3. Verify staging files before promoting
+        stage_record = load_yaml_safe(stage_record_path)
+        validate_against_schema(stage_record, run_record_schema)
+
+        stage_events = load_events(stage_events_path)
+        if len(stage_events) != 1 or stage_events[0]["event_id"] != f"EVT-{run_id}-INIT":
+            raise PersistenceError("Verification of staging event journal failed.")
+
+        # 4. Promote staging files
+        stage_dir.rename(run_dir)
+        stage_record_path.rename(run_record_path)
+
+    except Exception as e:
+        # Rollback staging artifacts upon error
+        if stage_record_path.exists():
+            try:
+                stage_record_path.unlink()
+            except OSError:
+                pass
+        if stage_dir.exists():
+            try:
+                shutil.rmtree(stage_dir)
+            except OSError:
+                pass
+        raise e
 
     print(f"Run {run_id} initialized successfully.")
     print("WARNING: This is a foundation/kernel and not a finished cross-provider runner.")
@@ -231,20 +294,27 @@ def get_status(repository_path: Path, run_id: str, as_json: bool = False) -> Opt
     run_record_path = resolve_safe_path(repo_root, f".ai/runs/{run_id}.yaml")
 
     record = load_yaml_safe(run_record_path)
-    run_record_schema = repo_root / "schemas/run-record.schema.json"
+    run_record_schema = TRUSTED_SCHEMAS_DIR / "run-record.schema.json"
     validate_against_schema(record, run_record_schema)
+
+    # Load and validate event journal
+    run_dir = resolve_safe_path(repo_root, f".ai/runs/{run_id}")
+    events_path = run_dir / "events.jsonl"
+    events = load_events(events_path)
 
     if as_json:
         return json.dumps(record, indent=2, ensure_ascii=False)
 
-    # Otherwise print human-readable status
-    state_transitions = record.get("state_transitions", [])
-    last_event = state_transitions[-1] if state_transitions else None
-    last_event_str = (
-        f"{last_event['from']} -> {last_event['to']} ({last_event['at']}): {last_event['reason']}"
-        if last_event
-        else "none"
-    )
+    # Show the actual last event in the journal, whether it is a transition or not
+    last_journal_event = events[-1] if events else None
+    if last_journal_event:
+        last_event_str = (
+            f"#{last_journal_event.get('seq')} [{last_journal_event.get('type')}] "
+            f"ID: {last_journal_event.get('event_id')} by {last_journal_event.get('actor')}: "
+            f"{json.dumps(last_journal_event.get('data'), ensure_ascii=False)}"
+        )
+    else:
+        last_event_str = "none"
 
     budgets = record.get("budgets", {})
     budgets_str = (
@@ -272,93 +342,147 @@ def resume_run(repository_path: Path, run_id: str) -> None:
     run_record_path = resolve_safe_path(repo_root, f".ai/runs/{run_id}.yaml")
     run_dir = resolve_safe_path(repo_root, f".ai/runs/{run_id}")
     events_path = run_dir / "events.jsonl"
+    metadata_path = run_dir / "metadata.yaml"
 
+    # -- STAGE 1: Verify schema run record --
     record = load_yaml_safe(run_record_path)
-    run_record_schema = repo_root / "schemas/run-record.schema.json"
+    run_record_schema = TRUSTED_SCHEMAS_DIR / "run-record.schema.json"
     validate_against_schema(record, run_record_schema)
 
-    # 1. Load event journal
+    # Load event journal & metadata
     events = load_events(events_path)
+    if not metadata_path.is_file():
+        raise ValidationError(f"Metadata file not found: {metadata_path}")
+    try:
+        yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"Metadata is corrupted: {exc}")
 
-    # 2. Check consistency between record and event journal
-    journal_transitions = [e for e in events if e.get("type") == "state_transition"]
-    if len(record.get("state_transitions", [])) != len(journal_transitions):
-        raise ValidationError(
-            "Consistency check failed: State transition count mismatch between record and event journal."
-        )
-
-    for record_t, journal_t in zip(record.get("state_transitions", []), journal_transitions):
-        j_data = journal_t.get("data", {})
-        if (
-            record_t.get("from") != j_data.get("from")
-            or record_t.get("to") != j_data.get("to")
-            or record_t.get("at") != j_data.get("at")
-        ):
-            raise ValidationError(
-                f"Consistency check failed: Mismatched transition record. "
-                f"Record has {record_t}, journal event has {j_data}"
-            )
-
-    # 3. Check contract payload hash
+    # -- STAGE 2: Verify exact development contract and payload hash --
     contract_id = record.get("contract_id", "")
     contract_payload_hash = record.get("contract_payload_sha256", "")
     contract_path = find_contract_by_id(repo_root, contract_id, contract_payload_hash)
+    # Perform strict contract schema & semantics checks
+    validate_contract_helper(contract_path, repo_root)
 
-    # 4. Check Git base/current revision
+    # -- STAGE 3: Validate transitions, ledger contiguity, monotonicity, matching state --
+    transitions = record.get("state_transitions", [])
+    if not transitions:
+        raise ValidationError("State transitions list is empty.")
+
+    # Validate transition admissibility
+    for i, t in enumerate(transitions):
+        check_transition(t["from"], t["to"])
+
+    # Ledger contiguity
+    for i in range(1, len(transitions)):
+        if transitions[i - 1]["to"] != transitions[i]["from"]:
+            raise ValidationError(
+                f"Ledger contiguity failed: transition {i} from '{transitions[i]['from']}' "
+                f"does not match previous target '{transitions[i - 1]['to']}'."
+            )
+
+    # Timestamp monotonicity
+    for i in range(1, len(transitions)):
+        prev_t = dt.datetime.fromisoformat(transitions[i - 1]["at"].replace("Z", "+00:00"))
+        curr_t = dt.datetime.fromisoformat(transitions[i]["at"].replace("Z", "+00:00"))
+        if curr_t < prev_t:
+            raise ValidationError(
+                f"Monotonicity check failed: transition {i} timestamp '{transitions[i]['at']}' "
+                f"is earlier than previous '{transitions[i - 1]['at']}'."
+            )
+
+    # Last transition target matches state
+    if transitions[-1]["to"] != record.get("state"):
+        raise ValidationError(
+            f"State mismatch: last transition target '{transitions[-1]['to']}' "
+            f"does not match record state '{record.get('state')}'."
+        )
+
+    # -- STAGE 4: Match transitions and events directly --
+    journal_transitions = [e for e in events if e.get("type") == "state_transition"]
+    if len(transitions) != len(journal_transitions):
+        raise ValidationError(
+            f"State transition count mismatch: record lists {len(transitions)} transitions, "
+            f"but event journal contains {len(journal_transitions)} transition events."
+        )
+
+    for i, (rec_t, j_t) in enumerate(zip(transitions, journal_transitions)):
+        j_data = j_t.get("data", {})
+        if (
+            rec_t.get("from") != j_data.get("from")
+            or rec_t.get("to") != j_data.get("to")
+            or rec_t.get("at") != j_data.get("at")
+            or rec_t.get("reason") != j_data.get("reason")
+        ):
+            raise ValidationError(
+                f"Journal mismatch at step {i}:\n"
+                f"  Record Transition: {rec_t}\n"
+                f"  Journal Event data: {j_data}"
+            )
+
+    # -- STAGE 5: Verify Git revisions, HEAD sync, tree hashes --
+    base_rev = record.get("base_revision", "")
+    curr_rev = record.get("current_revision", "")
+
+    if not git_object_exists(repo_root, base_rev):
+        raise ValidationError(f"base_revision '{base_rev}' does not exist as a commit in the repository.")
+    if not git_object_exists(repo_root, curr_rev):
+        raise ValidationError(f"current_revision '{curr_rev}' does not exist as a commit in the repository.")
+
+    # Ancestry check
+    if not git_is_ancestor(repo_root, base_rev, curr_rev):
+        raise ValidationError(f"base_revision '{base_rev}' is not an ancestor of current_revision '{curr_rev}'.")
+
+    # HEAD revision match
     head_commit = get_git_head(repo_root)
+    if curr_rev != head_commit:
+        raise ValidationError(
+            f"current_revision '{curr_rev}' does not match repository HEAD commit '{head_commit}'."
+        )
 
-    # Validate that current revision exists in the repo
-    # Check if run record's current_revision matches HEAD
-    is_head_matching = (record.get("current_revision") == head_commit)
+    # Committed tree SHA match
+    actual_tree = get_committed_tree_sha256(repo_root, head_commit)
+    if record.get("current_tree_sha256") != actual_tree:
+        raise ValidationError(
+            f"current_tree_sha256 '{record.get('current_tree_sha256')}' does not match "
+            f"committed HEAD tree SHA-256 '{actual_tree}'."
+        )
 
-    # 5. Determine last valid state
+    # -- SUCCESS BLOCK --
+    # Now all checks have passed, we can print confirmation and state info
     last_valid_state = record.get("state", "DISCOVER")
-
-    # 6. Report status and resume options
     print(f"Run record and event journal are consistent for run '{run_id}'.")
     print(f"Contract: {contract_path.relative_to(repo_root)}")
     print(f"Current Git HEAD revision: {head_commit}")
-    print(f"Run current_revision matches HEAD: {is_head_matching}")
+    print(f"Run current_revision matches HEAD: True")
     print(f"Last valid state: {last_valid_state}")
 
-    # Next state planning
-    state_to_next = {
-        "DISCOVER": "SPECIFY",
-        "SPECIFY": "PLAN",
-        "PLAN": "TEST_DESIGN",
-        "TEST_DESIGN": "IMPLEMENT",
-        "IMPLEMENT": "VERIFY",
-        "VERIFY": "REVIEW",
-        "REVIEW": "ACCEPT",
-        "ACCEPT": "COMPLETE",
-    }
-    next_state = state_to_next.get(last_valid_state)
-
-    if next_state:
-        print(f"Can resume from state '{last_valid_state}' to transition to '{next_state}'.")
+    next_states = get_allowed_next_states(last_valid_state)
+    if next_states:
+        print(f"Can resume from state '{last_valid_state}' to transition to one of: {sorted(list(next_states))}.")
         print(
-            f"Action required for '{next_state}' requires a future execution adapter (not implemented in this kernel MVP)."
+            f"Action required for state transitions requires a future execution adapter (not implemented in this kernel MVP)."
         )
     else:
         print(f"State '{last_valid_state}' is terminal or has no automated transition path.")
 
-    # State remains unchanged, no action taken on this MVP level.
     print("State remains unchanged (idempotent resume).")
     print("Notice: This is a foundation/kernel and not a finished cross-provider runner.")
 
 
 def verify_run(repository_path: Path, run_id: str, contract_rel_path: str) -> None:
-    """Run the existing run record validator with the target contract."""
+    """Run the existing run record validator with the target contract using trusted validator scripts."""
     repo_root = get_repo_root(repository_path)
     run_record_path = resolve_safe_path(repo_root, f".ai/runs/{run_id}.yaml")
     contract_path = resolve_safe_path(repo_root, contract_rel_path)
 
-    validator_script = repo_root / "scripts/validate_run_record.py"
+    validator_script = TRUSTED_SCRIPTS_DIR / "validate_run_record.py"
     if not validator_script.is_file():
         raise ValidationError(f"Repository validation script not found: {validator_script}")
 
     cmd = [
-        "python3",
+        sys.executable,
         str(validator_script),
         str(run_record_path),
         "--contract",
@@ -366,9 +490,9 @@ def verify_run(repository_path: Path, run_id: str, contract_rel_path: str) -> No
         "--repository",
         str(repo_root),
         "--schema",
-        str(repo_root / "schemas/run-record.schema.json"),
+        str(TRUSTED_SCHEMAS_DIR / "run-record.schema.json"),
         "--contract-schema",
-        str(repo_root / "schemas/development-contract.schema.json"),
+        str(TRUSTED_SCHEMAS_DIR / "development-contract.schema.json"),
     ]
 
     res = subprocess.run(cmd, cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

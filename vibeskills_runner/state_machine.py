@@ -10,13 +10,13 @@ ALLOWED_TRANSITIONS: Dict[str, Set[str]] = {
     "START": {"DISCOVER"},
     "DISCOVER": {"SPECIFY", "ESCALATE"},
     "SPECIFY": {"PLAN", "ESCALATE"},
-    "PLAN": {"TEST_DESIGN", "IMPLEMENT", "ESCALATE"},
+    "PLAN": {"TEST_DESIGN", "ESCALATE"},
     "TEST_DESIGN": {"IMPLEMENT", "ESCALATE"},
     "IMPLEMENT": {"VERIFY", "ESCALATE"},
     "VERIFY": {"REPAIR", "REVIEW", "ESCALATE"},
-    "REPAIR": {"IMPLEMENT", "VERIFY", "ESCALATE"},
+    "REPAIR": {"IMPLEMENT", "ESCALATE"},
     "REVIEW": {"REPAIR", "ACCEPT", "ESCALATE"},
-    "ACCEPT": {"COMPLETE", "ESCALATE"},
+    "ACCEPT": {"COMPLETE"},
     "ESCALATE": {"COMPLETE"},
 }
 
@@ -38,3 +38,10 @@ def check_transition(from_state: str, to_state: str) -> None:
         raise StateMachineError(
             f"State transition '{from_state}' -> '{to_state}' is not allowed."
         )
+
+
+def get_allowed_next_states(state: str) -> Set[str]:
+    """Retrieve the set of states that can be transitioned to from the given state."""
+    if state not in STATES:
+        raise StateMachineError(f"Unknown state: '{state}'")
+    return ALLOWED_TRANSITIONS.get(state, set())

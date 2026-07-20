@@ -60,3 +60,31 @@ def get_committed_tree_sha256(repository: Path, revision: str) -> str:
         return hashlib.sha256(res.stdout).hexdigest()
     except subprocess.SubprocessError as e:
         raise GitStateError(f"Failed to get committed tree SHA-256: {e}")
+
+
+def git_object_exists(repository: Path, revision: str) -> bool:
+    """Check if a commit object exists in the repository."""
+    try:
+        res = subprocess.run(
+            ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+            cwd=repository,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def git_is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
+    """Check if the ancestor commit is indeed an ancestor of the descendant commit."""
+    try:
+        res = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=repository,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
