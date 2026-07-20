@@ -11,7 +11,7 @@ Turn a vague product idea into an approved development contract, bounded impleme
 [![Agent Skills](https://img.shields.io/badge/standard-Agent%20Skills-2563eb)](https://agentskills.io/specification)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 
-[Quick start](#quick-start) · [Which skill when](#which-skill-when) · [The five skills](#the-five-skills) · [Installation](#installation) · [Security](#security-model)
+[Quick start](#quick-start) · [Which skill when](#which-skill-when) · [The five skills](#the-five-skills) · [Installation](#installation) · [Security](#security-model) · [Vibeskills Runner](docs/RUNNER.md)
 
 </div>
 
