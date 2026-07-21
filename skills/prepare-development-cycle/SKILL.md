@@ -7,6 +7,12 @@ description: Convert a new product idea, feature request, bug, refactor, or arch
 
 Produce an approved development contract. Do not write production code.
 
+## Respond in the user's language
+
+Detect the user's language from their messages and use it for all prose addressed to them: questions, explanations, recommendations, status, and the closing summary. Keep every machine token verbatim — code, commands, file paths, schema field names, stable IDs, and the status or verdict values this skill returns — and convey their meaning in the surrounding prose rather than translating the tokens. If the user's language is unclear, ask once, then continue in the chosen language.
+
+Persisted artifacts are contracts, not chat. Keep their template headings, YAML keys, stable IDs, and status tokens exactly as specified so downstream skills and validators keep working. Narrative content inside an artifact may follow the user's language when the user asks for it.
+
 ## Load references and templates
 
 - Read [document-depth.md](references/document-depth.md) to select full, compact, or lean documentation.
@@ -160,3 +166,20 @@ Return exactly one readiness outcome:
 - `DRAFT`: useful documents exist but approval is pending;
 - `NOT_READY`: material decisions or evidence remain unresolved;
 - `REJECTED`: user chose not to proceed.
+
+## Summarize what you did
+
+After returning the outcome, close with a short summary in the user's language that states:
+
+- what you did and what it decided or produced;
+- the readiness outcome you returned and what it authorizes or blocks next;
+- where each created or updated file now lives, by exact repository path;
+- the recommended next step.
+
+Name file locations explicitly and never claim a file was written that was not. When repository writes were unavailable and the output was returned in chat only, say so and name where it should be persisted.
+
+This skill normally writes:
+
+- `.ai/discovery/<slug>-decision-brief.md` — the decision brief, when a grilling phase produced one;
+- `.ai/specs/<slug>/PRD.md`, `.ai/specs/<slug>/TECHNICAL-BRIEF.md`, and `.ai/specs/<slug>/development-contract.yaml`;
+- `.ai/specs/<slug>/DESIGN-BRIEF.md` when `design_policy.applies` is true.

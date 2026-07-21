@@ -7,6 +7,12 @@ description: Discover, select, document, extend, and enforce a product design sy
 
 Treat design as an implementation contract, not final-stage decoration. Reuse an existing approved system before proposing a new one.
 
+## Respond in the user's language
+
+Detect the user's language from their messages and use it for all prose addressed to them: questions, explanations, recommendations, status, and the closing summary. Keep every machine token verbatim — code, commands, file paths, schema field names, stable IDs, and the status or verdict values this skill returns — and convey their meaning in the surrounding prose rather than translating the tokens. If the user's language is unclear, ask once, then continue in the chosen language.
+
+Persisted artifacts are contracts, not chat. Keep their template headings, YAML keys, stable IDs, and status tokens exactly as specified so downstream skills and validators keep working. Narrative content inside an artifact may follow the user's language when the user asks for it.
+
 ## Load references and assets
 
 - Read [discovery-and-audit.md](references/discovery-and-audit.md) before concluding whether a system exists.
@@ -107,3 +113,20 @@ Return one of:
 - `DESIGN_REVIEW_APPROVE`: implementation conforms;
 - `DESIGN_REVIEW_BLOCK`: list evidence-bound deviations;
 - `NOT_APPLICABLE`: record the reason and require no design gates.
+
+## Summarize what you did
+
+After returning the outcome, close with a short summary in the user's language that states:
+
+- what you did and what it decided or produced;
+- the status or verdict you returned and what it means for the user;
+- where each created or updated file now lives, by exact repository path;
+- the recommended next step.
+
+Name file locations explicitly and never claim a file was written that was not. When repository writes were unavailable and the output was returned in chat only, say so and name where it should be persisted.
+
+This skill normally writes:
+
+- `.ai/design-system.yaml` — the design-system manifest;
+- the task `DESIGN-BRIEF.md` in the task specification directory, for example `.ai/specs/<slug>/DESIGN-BRIEF.md`;
+- any Design System Change Request document you created, at its repository path.
