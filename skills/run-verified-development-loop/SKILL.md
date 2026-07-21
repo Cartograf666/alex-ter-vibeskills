@@ -7,6 +7,12 @@ description: Execute an approved PRD and development contract through bounded mu
 
 Use one manager-controlled state machine. Let models propose changes; let deterministic tools decide whether the code works.
 
+## Respond in the user's language
+
+Detect the user's language from their messages and use it for all prose addressed to them: questions, explanations, recommendations, status, and the closing summary. Keep every machine token verbatim — code, commands, file paths, schema field names, stable IDs, and the status or verdict values this skill returns — and convey their meaning in the surrounding prose rather than translating the tokens. If the user's language is unclear, ask once, then continue in the chosen language.
+
+Persisted artifacts are contracts, not chat. Keep their template headings, YAML keys, stable IDs, and status tokens exactly as specified so downstream skills and validators keep working. Narrative content inside an artifact may follow the user's language when the user asks for it.
+
 ## Load supporting material
 
 Read only the references needed for the current run:
@@ -205,3 +211,20 @@ Lead with the result. Include:
 Keep intermediate reasoning internal. Preserve task packets, result packets, command output, and reviewer verdicts as the auditable run record.
 
 Persist the versioned record at `.ai/runs/<run-id>.yaml`, including exact provider/model versions, context IDs, permissions, worktree base/head SHAs, patch hashes, frozen test hashes, per-criterion evidence, approvals, budgets, gate results, reviewed revision, and artifact paths. Validate accepted runs against both the run-record schema and the exact approved contract.
+
+## Summarize what you did
+
+The outcome report above is the technical record. Do not repeat it. Close with a short summary in the user's language that adds:
+
+- what the run means for the user, in plain terms;
+- the terminal status you returned and what it authorizes or blocks next;
+- where each created or updated file now lives, by exact repository path;
+- the recommended next step.
+
+Name file locations explicitly and never claim a file was written that was not. When repository writes were unavailable and the output was returned in chat only, say so and name where it should be persisted.
+
+This skill normally writes:
+
+- `.ai/runs/<run-id>.yaml` — the versioned run record;
+- the isolated branch or worktree used for implementation, named by its base and head revision;
+- retained verification artifacts — visual, accessibility, and command evidence — by path and hash.

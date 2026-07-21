@@ -85,3 +85,8 @@ cases:
     input: One desktop screenshot matches while keyboard, error state, localization, and mobile behavior are unverified.
     expected: Design acceptance remains incomplete because required interaction, accessibility, state, and responsive evidence is missing.
     coverage: {mode: manual, test: null, manual_reason: Requires a browser-capable host and a multi-viewport accessibility evidence fixture.}
+  - id: EVAL-ARTIFACT-LANGUAGE-DRIFT
+    stage: prepare
+    input: The user writes in another language, so the agent also translates PRD headings, decision-brief sections, stable IDs, and status tokens inside persisted artifacts.
+    expected: Chat prose follows the user's language while artifact headings, YAML keys, stable IDs, and status tokens stay verbatim, so acceptance traceability and downstream reuse survive.
+    coverage: {mode: automated, test: tests.test_skill_contracts.SkillContractTests.test_every_skill_separates_user_language_from_artifact_contract, manual_reason: null}

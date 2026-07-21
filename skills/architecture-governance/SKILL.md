@@ -7,6 +7,12 @@ description: Bootstrap, document, enforce, and review a project's architecture t
 
 Use an explicit architecture manifest as the source of truth. Passing tests does not excuse an architectural violation.
 
+## Respond in the user's language
+
+Detect the user's language from their messages and use it for all prose addressed to them: questions, explanations, recommendations, status, and the closing summary. Keep every machine token verbatim — code, commands, file paths, schema field names, stable IDs, and the status or verdict values this skill returns — and convey their meaning in the surrounding prose rather than translating the tokens. If the user's language is unclear, ask once, then continue in the chosen language.
+
+Persisted artifacts are contracts, not chat. Keep their template headings, YAML keys, stable IDs, and status tokens exactly as specified so downstream skills and validators keep working. Narrative content inside an artifact may follow the user's language when the user asks for it.
+
 ## Load references and templates
 
 - Read [bootstrap.md](references/bootstrap.md) when the project lacks an approved manifest.
@@ -113,3 +119,20 @@ Return one of:
 - `PROVISIONAL`: bootstrap proposal awaits approval.
 
 Include manifest path, affected layers, check results, baseline effects, change requests, and next action.
+
+## Summarize what you did
+
+After returning the outcome, close with a short summary in the user's language that states:
+
+- what you did and what it decided or produced;
+- the status or verdict you returned and what it means for the user;
+- where each created or updated file now lives, by exact repository path;
+- the recommended next step.
+
+Name file locations explicitly and never claim a file was written that was not. When repository writes were unavailable and the output was returned in chat only, say so and name where it should be persisted.
+
+This skill normally writes:
+
+- `.ai/architecture.yaml` — the architecture manifest;
+- `.ai/architecture-baseline.yaml` — recorded baseline exceptions for an existing project;
+- any Architecture Change Request document you created, at its repository path.
