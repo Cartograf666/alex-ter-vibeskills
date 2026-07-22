@@ -39,6 +39,7 @@ Subprocesses do not inherit the host environment. Each tool receives a minimal a
 - **Contract Validator**: Receives only `VIBESKILLS_APPROVAL_HMAC_KEY` and `VIBESKILLS_APPROVAL_HMAC_KEYS`.
 - **Run-Record Validator**: Receives only `VIBESKILLS_APPROVAL_HMAC_KEY(S)` and `VIBESKILLS_RUN_HMAC_KEY(S)`.
 - **Python Flags**: All subprocesses enforce `PYTHONNOUSERSITE=1`, `PYTHONSAFEPATH=1`, and `PYTHONDONTWRITEBYTECODE=1`. Cloud credentials, provider API keys, and arbitrary environment variables are never passed.
+- **Runtime Dependencies**: The isolated dependency root is selected only from the active Python runtime's `site` locations after verifying the required packages are present; it never uses `sys.modules`, `find_spec`, or the target repository's `sys.path`.
 
 ---
 
@@ -50,7 +51,7 @@ Promotion transactions proceed through explicit, monotonic phases:
 1. `STAGED`: Staging files (`.yaml.stage` and `.stage/`) created and validated.
 2. `DIRECTORY_PROMOTED`: Staging directory renamed to final directory (`.ai/runs/<run_id>/`).
 3. `RECORD_PROMOTED`: Staging record renamed to final record (`.ai/runs/<run_id>.yaml`).
-4. `COMPLETE`: Full published run integrity validation succeeded; marker updated to `COMPLETE`.
+4. `COMPLETE`: Final record, journal, and metadata SHA-256 values still match the marker and full published-run validation succeeded; marker updated to `COMPLETE`.
 5. `Controlled Cleanup`: `.stage_marker` unlinked from final directory, transaction marker unlinked last.
 
 ### Marker & Topology Reconciliation Matrix
@@ -71,7 +72,7 @@ During `resume` or recovery, the runner reconciles `marker.phase`, file topology
 
 ### Staging Ownership
 
-Staging files are owned strictly by validated transaction markers. If staging files (`.yaml.stage` or `.stage/`) exist without a valid matching transaction marker, the runner **fails closed** (`ValidationError`). Automatic markerless cleanup is disabled to prevent attackers from causing deletion of arbitrary files.
+Staging files are owned strictly by validated transaction markers. If staging files (`.yaml.stage` or `.stage/`) exist without a valid matching transaction marker, the runner **fails closed** (`ValidationError`). The sole exception is the still-running initializer immediately after its first marker write fails: it may remove only the exact, hash-verified staging artifacts it created while holding the run lock. Automatic markerless cleanup on later commands remains disabled.
 
 ---
 

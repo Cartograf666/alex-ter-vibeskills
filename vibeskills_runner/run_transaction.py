@@ -111,8 +111,7 @@ class RunLock:
             return
         self._verify_lock_path_safety()
         if not self.lock_path.exists():
-            self.acquired = False
-            return
+            raise ValidationError("Lock ownership check failed: lock file disappeared before release.")
 
         try:
             content = self.lock_path.read_text(encoding="utf-8")
@@ -191,29 +190,25 @@ class RunTransaction:
                 f"Security breach attempt: path '{path}' escapes runs directory."
             ) from exc
 
-    def write_marker(self, phase: Any, hashes: Dict[str, str]) -> None:
-        """Atomically write the transaction marker."""
-        if isinstance(phase, TransactionPhase):
-            phase_str = phase.value
-        elif isinstance(phase, str):
-            if phase not in TransactionPhase.__members__:
-                raise ValidationError(f"Invalid transaction phase string: '{phase}'")
-            phase_str = phase
-        else:
-            raise ValidationError(f"Invalid transaction phase type: {type(phase)}")
-
-        # Validate hashes structure
+    def _validate_hashes(self, hashes: Dict[str, str]) -> None:
+        """Validate the immutable file hashes stored in a transaction marker."""
         if not isinstance(hashes, dict):
             raise ValidationError("Transaction marker hashes must be a mapping.")
-        for k in ["record", "journal", "metadata"]:
-            h_val = hashes.get(k)
-            if not isinstance(h_val, str) or not SHA256_REGEX.match(h_val):
-                raise ValidationError(f"Invalid SHA-256 hash for '{k}': '{h_val}'")
+        for key in ["record", "journal", "metadata"]:
+            value = hashes.get(key)
+            if not isinstance(value, str) or not SHA256_REGEX.match(value):
+                raise ValidationError(f"Invalid SHA-256 hash for '{key}': '{value}'")
+
+    def write_marker(self, phase: TransactionPhase, hashes: Dict[str, str]) -> None:
+        """Atomically write the transaction marker."""
+        if not isinstance(phase, TransactionPhase):
+            raise ValidationError("Transaction phase must be a TransactionPhase value.")
+        self._validate_hashes(hashes)
 
         self.verify_path_confinement(self.marker_path)
         marker_data = {
             "run_id": self.run_id,
-            "phase": phase_str,
+            "phase": phase.value,
             "stage_record_path": str(self.stage_record_path),
             "stage_dir_path": str(self.stage_dir_path),
             "final_record_path": str(self.final_record_path),
@@ -248,13 +243,62 @@ class RunTransaction:
             raise PersistenceError(f"Failed to promote run record: {e}") from e
 
     def write_transaction_phase(
-        self, phase: Any, hashes: Dict[str, str]
+        self, phase: TransactionPhase, hashes: Dict[str, str]
     ) -> None:
         """Write the transaction phase marker."""
         self.write_marker(phase, hashes)
 
+    def _load_marker(self) -> tuple[TransactionPhase, Dict[str, str]]:
+        """Load a marker only when it names this transaction and canonical paths."""
+        if self.marker_path.is_symlink() or os.path.islink(str(self.marker_path)):
+            raise ValidationError(f"Security breach: Transaction marker is a symbolic link: {self.marker_path}")
+        if not self.marker_path.is_file():
+            raise ValidationError(f"Transaction marker is missing: {self.marker_path}")
+        try:
+            marker_data = yaml.safe_load(self.marker_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValidationError(f"Transaction marker is corrupted: {exc}") from exc
+        if not isinstance(marker_data, dict):
+            raise ValidationError("Transaction marker content is not a mapping.")
+        try:
+            phase = TransactionPhase(marker_data.get("phase"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Transaction marker phase is invalid or missing: '{marker_data.get('phase')}'"
+            ) from exc
+        if marker_data.get("run_id") != self.run_id:
+            raise ValidationError("Transaction marker run_id mismatch.")
+        if (
+            marker_data.get("stage_record_path") != str(self.stage_record_path)
+            or marker_data.get("stage_dir_path") != str(self.stage_dir_path)
+            or marker_data.get("final_record_path") != str(self.final_record_path)
+            or marker_data.get("final_dir_path") != str(self.final_dir_path)
+        ):
+            raise ValidationError("Path mismatch detected in transaction marker file.")
+        hashes = marker_data.get("hashes")
+        self._validate_hashes(hashes)
+        return phase, hashes
+
+    def verify_final_integrity(self, hashes: Dict[str, str]) -> None:
+        """Require the published topology to match the immutable staging hashes."""
+        if not self.verify_record_integrity(self.final_record_path, hashes):
+            raise ValidationError("Final record integrity check failed.")
+        if not self.verify_dir_integrity(self.final_dir_path, hashes):
+            raise ValidationError("Final directory integrity check failed.")
+
     def cleanup_transaction(self) -> None:
-        """Perform cleanup of stage markers and delete the transaction marker."""
+        """Remove recovery evidence only from a verified COMPLETE transaction."""
+        phase, hashes = self._load_marker()
+        if phase is not TransactionPhase.COMPLETE:
+            raise ValidationError("Controlled cleanup requires a COMPLETE transaction marker.")
+        if (
+            not self.final_record_path.is_file()
+            or not self.final_dir_path.is_dir()
+            or self.stage_record_path.exists()
+            or self.stage_dir_path.exists()
+        ):
+            raise ValidationError("Controlled cleanup requires the exact COMPLETE filesystem topology.")
+        self.verify_final_integrity(hashes)
         if self.final_dir_path.exists():
             stage_marker = self.final_dir_path / ".stage_marker"
             if stage_marker.is_symlink() or os.path.islink(str(stage_marker)):
@@ -265,29 +309,45 @@ class RunTransaction:
                 except OSError as e:
                     raise PersistenceError(f"Failed to cleanup stage marker: {e}") from e
 
-        if self.marker_path.is_symlink() or os.path.islink(str(self.marker_path)):
-            raise ValidationError(f"Security breach: Transaction marker is a symbolic link: {self.marker_path}")
-        if self.marker_path.exists():
-            try:
-                self.marker_path.unlink()
-            except OSError as e:
-                raise PersistenceError(f"Failed to delete transaction marker: {e}") from e
+        try:
+            self.marker_path.unlink()
+        except OSError as e:
+            raise PersistenceError(f"Failed to delete transaction marker: {e}") from e
+
+    def cleanup_unpublished_staging(self, hashes: Dict[str, str]) -> None:
+        """Clean only verified artifacts created by this still-running unpublished operation."""
+        if self.marker_path.exists() or self.final_record_path.exists() or self.final_dir_path.exists():
+            raise ValidationError("Cannot clean unpublished staging after marker or final artifacts exist.")
+        if not self.stage_record_path.is_file() or not self.stage_dir_path.is_dir():
+            raise ValidationError("Cannot clean incomplete unpublished staging artifacts.")
+        if not self.verify_stage_marker(self.stage_dir_path):
+            raise ValidationError("Cannot clean staging without a matching stage marker.")
+        if not self.verify_record_integrity(self.stage_record_path, hashes):
+            raise ValidationError("Cannot clean modified staging record.")
+        if not self.verify_dir_integrity(self.stage_dir_path, hashes):
+            raise ValidationError("Cannot clean modified staging directory.")
+        try:
+            shutil.rmtree(self.stage_dir_path)
+            self.stage_record_path.unlink()
+        except OSError as exc:
+            raise PersistenceError(f"Failed to clean unpublished staging artifacts: {exc}") from exc
 
     def execute_promotion(
-        self, hashes: Dict[str, str], validate_published: Optional[Callable[[], None]] = None
+        self, hashes: Dict[str, str], validate_published: Callable[[], None]
     ) -> None:
         """Promote staging files to final destination following exact transaction phases."""
-        self.write_transaction_phase(TransactionPhase.STAGED, hashes)
+        if not callable(validate_published):
+            raise ValidationError("Published-run validation callback is required for promotion.")
+        try:
+            self.write_transaction_phase(TransactionPhase.STAGED, hashes)
+        except Exception:
+            self.cleanup_unpublished_staging(hashes)
+            raise
         self.promote_directory()
         self.write_transaction_phase(TransactionPhase.DIRECTORY_PROMOTED, hashes)
         self.promote_record()
         self.write_transaction_phase(TransactionPhase.RECORD_PROMOTED, hashes)
-
-        if validate_published:
-            validate_published()
-
-        self.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
-        self.cleanup_transaction()
+        self.complete_promotion(hashes, validate_published)
 
     def verify_dir_integrity(self, path: Path, hashes: Dict[str, str]) -> bool:
         """Check events and metadata hashes inside the directory."""
@@ -319,10 +379,19 @@ class RunTransaction:
         except Exception:
             return False
 
+    def complete_promotion(self, hashes: Dict[str, str], validate_published: Callable[[], None]) -> None:
+        """Bind final bytes and semantic validation before recording COMPLETE."""
+        if not callable(validate_published):
+            raise ValidationError("Published-run validation callback is required for completion.")
+        self.verify_final_integrity(hashes)
+        validate_published()
+        self.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
+        self.cleanup_transaction()
+
     def recover(
         self,
         mode: RecoveryMode,
-        validate_published: Optional[Callable[[], None]] = None,
+        validate_published: Callable[[], None],
     ) -> None:
         """Perform verification-driven recovery or rollback based on mode, marker and topology."""
         self.verify_path_confinement(self.final_record_path)
@@ -351,37 +420,9 @@ class RunTransaction:
                 )
             return
 
-        # Case 2: Transaction marker exists -> parse and validate
-        try:
-            marker_data = yaml.safe_load(self.marker_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise ValidationError(f"Transaction marker is corrupted: {exc}")
-
-        if not isinstance(marker_data, dict):
-            raise ValidationError("Transaction marker content is not a mapping.")
-
-        phase_val = marker_data.get("phase")
-        if not isinstance(phase_val, str) or phase_val not in TransactionPhase.__members__:
-            raise ValidationError(f"Transaction marker phase is invalid or missing: '{phase_val}'")
-
-        if marker_data.get("run_id") != self.run_id:
-            raise ValidationError("Transaction marker run_id mismatch.")
-
-        if (
-            marker_data.get("stage_record_path") != str(self.stage_record_path)
-            or marker_data.get("stage_dir_path") != str(self.stage_dir_path)
-            or marker_data.get("final_record_path") != str(self.final_record_path)
-            or marker_data.get("final_dir_path") != str(self.final_dir_path)
-        ):
-            raise ValidationError("Path mismatch detected in transaction marker file.")
-
-        hashes = marker_data.get("hashes")
-        if not isinstance(hashes, dict):
-            raise ValidationError("Transaction marker hashes missing or invalid.")
-        for k in ["record", "journal", "metadata"]:
-            h = hashes.get(k)
-            if not isinstance(h, str) or not SHA256_REGEX.match(h):
-                raise ValidationError(f"Transaction marker hash '{k}' missing or malformed.")
+        if not callable(validate_published):
+            raise ValidationError("Published-run validation callback is required for recovery.")
+        phase, hashes = self._load_marker()
 
         # Check topology
         stage_rec = self.stage_record_path.exists()
@@ -389,7 +430,7 @@ class RunTransaction:
         final_rec = self.final_record_path.exists()
         final_dir = self.final_dir_path.exists()
 
-        if phase_val == TransactionPhase.STAGED.value:
+        if phase is TransactionPhase.STAGED:
             if stage_rec and stage_dir and not final_rec and not final_dir:
                 if not self.verify_stage_marker(self.stage_dir_path):
                     raise ValidationError("Stage marker missing or run_id mismatch in stage directory.")
@@ -406,7 +447,7 @@ class RunTransaction:
             else:
                 raise ValidationError("Marker phase 'STAGED' is ahead of or incompatible with filesystem topology.")
 
-        elif phase_val == TransactionPhase.DIRECTORY_PROMOTED.value:
+        elif phase is TransactionPhase.DIRECTORY_PROMOTED:
             if stage_rec and final_dir and not stage_dir and not final_rec:
                 if not self.verify_stage_marker(self.final_dir_path):
                     raise ValidationError("Stage marker missing or run_id mismatch in promoted directory.")
@@ -417,29 +458,23 @@ class RunTransaction:
             else:
                 raise ValidationError("Marker phase 'DIRECTORY_PROMOTED' is incompatible with filesystem topology.")
 
-        elif phase_val == TransactionPhase.RECORD_PROMOTED.value:
+        elif phase is TransactionPhase.RECORD_PROMOTED:
             if final_rec and final_dir and not stage_rec and not stage_dir:
                 self.promote_from_record_promoted(hashes, validate_published)
             else:
                 raise ValidationError("Marker phase 'RECORD_PROMOTED' is incompatible with filesystem topology.")
 
-        elif phase_val == TransactionPhase.COMPLETE.value:
+        elif phase is TransactionPhase.COMPLETE:
             if final_rec and final_dir and not stage_rec and not stage_dir:
-                if not self.verify_record_integrity(self.final_record_path, hashes):
-                    raise ValidationError("Final record integrity check failed for COMPLETE transaction marker.")
-                if not self.verify_dir_integrity(self.final_dir_path, hashes):
-                    raise ValidationError("Final directory integrity check failed for COMPLETE transaction marker.")
-                if validate_published:
-                    validate_published()
-                self.cleanup_transaction()
+                self.complete_promotion(hashes, validate_published)
             else:
                 raise ValidationError("Marker phase 'COMPLETE' is incompatible with filesystem topology.")
 
         else:
-            raise ValidationError(f"Unknown transaction phase '{phase_val}'.")
+            raise ValidationError(f"Unknown transaction phase '{phase}'.")
 
     def promote_from_staged(
-        self, hashes: Dict[str, str], validate_published: Optional[Callable[[], None]]
+        self, hashes: Dict[str, str], validate_published: Callable[[], None]
     ) -> None:
         if not self.verify_record_integrity(self.stage_record_path, hashes):
             raise ValidationError("Staged record integrity check failed during recovery.")
@@ -451,14 +486,10 @@ class RunTransaction:
         self.promote_record()
         self.write_transaction_phase(TransactionPhase.RECORD_PROMOTED, hashes)
 
-        if validate_published:
-            validate_published()
-
-        self.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
-        self.cleanup_transaction()
+        self.complete_promotion(hashes, validate_published)
 
     def promote_from_directory_promoted(
-        self, hashes: Dict[str, str], validate_published: Optional[Callable[[], None]]
+        self, hashes: Dict[str, str], validate_published: Callable[[], None]
     ) -> None:
         if not self.verify_dir_integrity(self.final_dir_path, hashes):
             raise ValidationError("Final directory integrity check failed during recovery.")
@@ -468,25 +499,17 @@ class RunTransaction:
         self.promote_record()
         self.write_transaction_phase(TransactionPhase.RECORD_PROMOTED, hashes)
 
-        if validate_published:
-            validate_published()
-
-        self.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
-        self.cleanup_transaction()
+        self.complete_promotion(hashes, validate_published)
 
     def promote_from_record_promoted(
-        self, hashes: Dict[str, str], validate_published: Optional[Callable[[], None]]
+        self, hashes: Dict[str, str], validate_published: Callable[[], None]
     ) -> None:
         if not self.verify_dir_integrity(self.final_dir_path, hashes):
             raise ValidationError("Final directory integrity check failed during recovery.")
         if not self.verify_record_integrity(self.final_record_path, hashes):
             raise ValidationError("Final record integrity check failed during recovery.")
 
-        if validate_published:
-            validate_published()
-
-        self.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
-        self.cleanup_transaction()
+        self.complete_promotion(hashes, validate_published)
 
     def rollback(self, hashes: Dict[str, str]) -> None:
         """Roll back transaction strictly when topology is STAGED and un-promoted."""

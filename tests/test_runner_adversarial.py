@@ -313,7 +313,7 @@ class TestRunnerAdversarial(unittest.TestCase):
         self.assertTrue(stage_dir.exists())
 
         # Now write a valid transaction marker with STAGED phase and hashes
-        from vibeskills_runner.run_transaction import RunTransaction, compute_file_sha256
+        from vibeskills_runner.run_transaction import RunTransaction, TransactionPhase, compute_file_sha256
         tx_test = RunTransaction(self.repo, run_id)
         events_file = stage_dir / "events.jsonl"
         events_file.write_text("{}\n", encoding="utf-8")
@@ -326,7 +326,7 @@ class TestRunnerAdversarial(unittest.TestCase):
             "metadata": compute_file_sha256(meta_file),
         }
 
-        tx_test.write_transaction_phase("STAGED", hashes)
+        tx_test.write_transaction_phase(TransactionPhase.STAGED, hashes)
 
         # Now, call init_run. It should rollback staging and initialize successfully
         self.init_valid_run(run_id)
@@ -638,7 +638,7 @@ class TestRunnerAdversarial(unittest.TestCase):
         self.approve_contract()
         run_id = "RUN-PHASE-FAIL"
 
-        from vibeskills_runner.run_transaction import RunTransaction
+        from vibeskills_runner.run_transaction import RunTransaction, TransactionPhase
         original_write_phase = RunTransaction.write_transaction_phase
 
         def side_effect(self_tx, phase, hashes):
@@ -798,12 +798,12 @@ class TestRunnerAdversarial(unittest.TestCase):
         self.approve_contract()
         run_id = "RUN-TAMPER-PATH"
 
-        from vibeskills_runner.run_transaction import RunTransaction
+        from vibeskills_runner.run_transaction import RunTransaction, TransactionPhase
 
         original_execute = RunTransaction.execute_promotion
 
         def tampered_execute(self_tx, hashes, *args, **kwargs):
-            self_tx.write_marker("STAGED", hashes)
+            self_tx.write_marker(TransactionPhase.STAGED, hashes)
             # Tamper the marker file to reference an escaped directory path
             marker_path = self_tx.marker_path
             marker_data = yaml.safe_load(marker_path.read_text(encoding="utf-8"))
@@ -1025,7 +1025,7 @@ class TestRunnerAdversarial(unittest.TestCase):
 
         # Calling recover MUST fail closed and preserve marker
         with self.assertRaises(ValidationError):
-            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE)
+            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE, validate_published=lambda: None)
 
         self.assertTrue(tx.marker_path.exists())
 
@@ -1046,7 +1046,7 @@ class TestRunnerAdversarial(unittest.TestCase):
         tx = RunTransaction(self.repo, run_id)
         from vibeskills_runner.run_transaction import RecoveryMode
         with self.assertRaises(ValidationError):
-            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE)
+            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE, validate_published=lambda: None)
 
         # Target record must remain untouched and present!
         self.assertTrue(target_record.exists())
@@ -1120,12 +1120,26 @@ class TestRunnerAdversarial(unittest.TestCase):
 
     def test_cleanup_failures_separately(self) -> None:
         self.approve_contract()
+        from vibeskills_runner.run_transaction import RecoveryMode
+
+        def mark_complete(tx: RunTransaction) -> None:
+            from vibeskills_runner.run_transaction import TransactionPhase, compute_file_sha256
+
+            tx.write_transaction_phase(
+                TransactionPhase.COMPLETE,
+                {
+                    "record": compute_file_sha256(tx.final_record_path),
+                    "journal": compute_file_sha256(tx.final_dir_path / "events.jsonl"),
+                    "metadata": compute_file_sha256(tx.final_dir_path / "metadata.yaml"),
+                },
+            )
 
         # 1. stage_marker cleanup failure
         run_id1 = "RUN-CLEANUP-STAGE-FAIL"
         self.init_valid_run(run_id1)
         tx1 = RunTransaction(self.repo, run_id1)
         (tx1.final_dir_path / ".stage_marker").write_text("stage", encoding="utf-8")
+        mark_complete(tx1)
 
         def fail_unlink_stage_marker(self_path, *args, **kwargs):
             if ".stage_marker" in str(self_path):
@@ -1135,14 +1149,15 @@ class TestRunnerAdversarial(unittest.TestCase):
         with patch.object(Path, "unlink", fail_unlink_stage_marker):
             with self.assertRaises(PersistenceError):
                 tx1.cleanup_transaction()
+        self.assertTrue(tx1.marker_path.exists())
+        tx1.recover(RecoveryMode.COMPLETE_IF_POSSIBLE, validate_published=lambda: None)
+        self.assertFalse(tx1.marker_path.exists())
 
         # 2. transaction marker cleanup failure
         run_id2 = "RUN-CLEANUP-MARKER-FAIL"
         self.init_valid_run(run_id2)
         tx2 = RunTransaction(self.repo, run_id2)
-        tx2.write_transaction_phase("COMPLETE", {
-            "record": "a"*64, "journal": "b"*64, "metadata": "c"*64
-        })
+        mark_complete(tx2)
 
         def fail_unlink_tx_marker(self_path, *args, **kwargs):
             if ".transaction.yaml" in str(self_path):
@@ -1152,6 +1167,9 @@ class TestRunnerAdversarial(unittest.TestCase):
         with patch.object(Path, "unlink", fail_unlink_tx_marker):
             with self.assertRaises(PersistenceError):
                 tx2.cleanup_transaction()
+        self.assertTrue(tx2.marker_path.exists())
+        tx2.recover(RecoveryMode.COMPLETE_IF_POSSIBLE, validate_published=lambda: None)
+        self.assertFalse(tx2.marker_path.exists())
 
     def test_lock_release_failure_chaining(self) -> None:
         self.approve_contract()
@@ -1222,3 +1240,83 @@ class TestRunnerAdversarial(unittest.TestCase):
 
         self.assertIn("  dirty_file_with_spaces.txt  ", str(ctx.exception))
         dirty_file.unlink()
+
+    def test_site_package_lookup_ignores_poisoned_module_state(self) -> None:
+        import importlib.machinery
+        import sys
+        import types
+
+        from vibeskills_runner.validator_bridge import get_isolated_env, get_site_packages_dir
+
+        attacker_root = Path(tempfile.mkdtemp())
+        try:
+            fake_module = types.ModuleType("jsonschema")
+            fake_module.__spec__ = importlib.machinery.ModuleSpec(
+                "jsonschema",
+                loader=None,
+                origin=str(attacker_root / "jsonschema" / "__init__.py"),
+            )
+            with patch.dict(sys.modules, {"jsonschema": fake_module}):
+                self.assertNotEqual(get_site_packages_dir(), str(attacker_root))
+                self.assertNotEqual(get_isolated_env(set()).get("PYTHONPATH"), str(attacker_root))
+        finally:
+            shutil.rmtree(attacker_root)
+
+    def test_initial_marker_write_failure_cleans_current_staging(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-STAGED-MARKER-FAIL"
+        original_write = RunTransaction.write_transaction_phase
+
+        def fail_staged_marker(self_tx, phase, hashes):
+            if phase.name == "STAGED":
+                raise OSError("Injected STAGED marker failure")
+            return original_write(self_tx, phase, hashes)
+
+        with patch.object(RunTransaction, "write_transaction_phase", fail_staged_marker):
+            with self.assertRaises(OSError):
+                self.init_valid_run(run_id)
+
+        for path in [
+            self.repo / f".ai/runs/{run_id}.yaml.stage",
+            self.repo / f".ai/runs/{run_id}.stage",
+            self.repo / f".ai/runs/{run_id}.transaction.yaml",
+            self.repo / f".ai/runs/{run_id}.yaml",
+            self.repo / f".ai/runs/{run_id}",
+        ]:
+            self.assertFalse(path.exists(), f"Unexpected recovery artifact: {path}")
+
+        self.init_valid_run(run_id)
+
+    def test_final_hashes_are_checked_before_complete(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-FINAL-HASH-RACE"
+
+        def tamper_after_record_promotion(self_tx):
+            _orig_promote_record(self_tx)
+            metadata_path = self_tx.final_dir_path / "metadata.yaml"
+            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+            metadata["created_at"] = "2099-01-01T00:00:00Z"
+            metadata_path.write_text(yaml.safe_dump(metadata), encoding="utf-8")
+
+        with patch.object(RunTransaction, "promote_record", tamper_after_record_promotion):
+            with self.assertRaises(ValidationError):
+                self.init_valid_run(run_id)
+
+        tx = RunTransaction(self.repo, run_id)
+        self.assertTrue(tx.marker_path.exists())
+        marker = yaml.safe_load(tx.marker_path.read_text(encoding="utf-8"))
+        self.assertEqual(marker["phase"], "RECORD_PROMOTED")
+
+    def test_transaction_api_requires_published_validation(self) -> None:
+        tx = RunTransaction(self.repo, "RUN-VALIDATION-REQUIRED")
+        with self.assertRaises(ValidationError):
+            tx.execute_promotion({}, None)
+
+    def test_lock_disappearance_fails_closed(self) -> None:
+        from vibeskills_runner.run_transaction import RunLock
+
+        lock = RunLock(self.repo, "RUN-LOCK-DISAPPEAR")
+        lock.acquire()
+        lock.lock_path.unlink()
+        with self.assertRaises(ValidationError):
+            lock.release()

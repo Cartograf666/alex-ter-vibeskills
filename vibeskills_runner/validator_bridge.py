@@ -1,5 +1,6 @@
 import os
 import re
+import site
 import stat
 import subprocess
 import sys
@@ -17,34 +18,17 @@ SHA256_REGEX = re.compile(r"^[0-9a-f]{64}$")
 
 
 def get_site_packages_dir() -> str:
-    """Resolve system site-packages directory containing jsonschema without trusting sys.modules."""
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("jsonschema")
-        if spec and spec.origin:
-            return str(Path(spec.origin).resolve().parent.parent)
-    except Exception:
-        pass
-    try:
-        import site
-
-        site_pkgs = site.getsitepackages()
-        if site_pkgs:
-            for p in site_pkgs:
-                if Path(p).is_dir():
-                    return str(Path(p).resolve())
-    except Exception:
-        pass
-    for p in sys.path:
-        if "site-packages" in p or "dist-packages" in p:
-            try:
-                resolved_p = Path(p).resolve()
-                if resolved_p.is_dir():
-                    return str(resolved_p)
-            except Exception:
-                pass
-    return ""
+    """Find a runtime dependency root without consulting import state or sys.path."""
+    candidates = [site.getusersitepackages(), *site.getsitepackages()]
+    for candidate in candidates:
+        root = Path(candidate).resolve()
+        jsonschema_init = root / "jsonschema" / "__init__.py"
+        yaml_init = root / "yaml" / "__init__.py"
+        if root.is_dir() and jsonschema_init.is_file() and yaml_init.is_file():
+            return str(root)
+    raise ValidationError(
+        "Could not locate trusted runtime dependencies (jsonschema and yaml) in site-packages."
+    )
 
 
 def get_isolated_env(allowed_keys: Set[str]) -> Dict[str, str]:
