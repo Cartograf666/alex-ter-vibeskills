@@ -38,7 +38,7 @@ _orig_cleanup_transaction = RunTransaction.cleanup_transaction
 class TestRunnerAdversarial(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tempdir.name)
+        self.repo = Path(self.tempdir.name).resolve()
 
         # Initialize test repo
         run_git("init", "-b", "main", cwd=self.repo)
@@ -999,3 +999,226 @@ class TestRunnerAdversarial(unittest.TestCase):
         self.assertTrue(tx.final_record_path.exists())
         self.assertTrue(tx.final_dir_path.exists())
         self.assertFalse(tx.marker_path.exists())
+
+    def test_complete_phase_hash_tampering(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-COMPLETE-TAMPER"
+        self.init_valid_run(run_id)
+
+        tx = RunTransaction(self.repo, run_id)
+        from vibeskills_runner.run_transaction import compute_file_sha256, TransactionPhase, RecoveryMode
+
+        hashes = {
+            "record": compute_file_sha256(tx.final_record_path),
+            "journal": compute_file_sha256(tx.final_dir_path / "events.jsonl"),
+            "metadata": compute_file_sha256(tx.final_dir_path / "metadata.yaml"),
+        }
+
+        # Write COMPLETE phase marker
+        tx.write_transaction_phase(TransactionPhase.COMPLETE, hashes)
+
+        # Tamper metadata.yaml inside final directory (keep valid YAML, alter value)
+        meta_file = tx.final_dir_path / "metadata.yaml"
+        meta = yaml.safe_load(meta_file.read_text(encoding="utf-8"))
+        meta["created_at"] = "2099-01-01T00:00:00Z"
+        meta_file.write_text(yaml.safe_dump(meta), encoding="utf-8")
+
+        # Calling recover MUST fail closed and preserve marker
+        with self.assertRaises(ValidationError):
+            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE)
+
+        self.assertTrue(tx.marker_path.exists())
+
+    def test_internal_symlink_target_preservation(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-SYM-TARGET"
+        target_run_id = "RUN-SYM-TARGET-OTHER"
+
+        self.init_valid_run(target_run_id)
+        target_record = self.repo / f".ai/runs/{target_run_id}.yaml"
+        self.assertTrue(target_record.exists())
+        original_target_content = target_record.read_text(encoding="utf-8")
+
+        # Create internal symlink for marker pointing to target_record
+        marker_symlink = self.repo / f".ai/runs/{run_id}.transaction.yaml"
+        os.symlink(target_record, marker_symlink)
+
+        tx = RunTransaction(self.repo, run_id)
+        from vibeskills_runner.run_transaction import RecoveryMode
+        with self.assertRaises(ValidationError):
+            tx.recover(RecoveryMode.COMPLETE_IF_POSSIBLE)
+
+        # Target record must remain untouched and present!
+        self.assertTrue(target_record.exists())
+        self.assertEqual(target_record.read_text(encoding="utf-8"), original_target_content)
+        marker_symlink.unlink()
+
+    def test_all_phase_write_failures(self) -> None:
+        self.approve_contract()
+        from vibeskills_runner.run_transaction import RunTransaction, TransactionPhase
+
+        phases_to_fail = [
+            TransactionPhase.STAGED,
+            TransactionPhase.DIRECTORY_PROMOTED,
+            TransactionPhase.RECORD_PROMOTED,
+            TransactionPhase.COMPLETE,
+        ]
+
+        for idx, fail_phase in enumerate(phases_to_fail):
+            run_id = f"RUN-WRITE-FAIL-{idx}"
+
+            orig_write = RunTransaction.write_transaction_phase
+
+            def failing_write(self_tx, phase, hashes):
+                p_val = phase.value if isinstance(phase, TransactionPhase) else phase
+                if p_val == fail_phase.value:
+                    raise OSError(f"Simulated write failure for {p_val}")
+                orig_write(self_tx, phase, hashes)
+
+            with patch.object(RunTransaction, "write_transaction_phase", failing_write):
+                with self.assertRaises((PersistenceError, OSError, ValidationError)):
+                    init_run(
+                        self.repo,
+                        ".ai/specs/my-slug/development-contract.yaml",
+                        run_id,
+                        "anthropic",
+                        "opus",
+                        "1.0",
+                        "manager-ctx-01",
+                    )
+
+    def test_published_validation_failure(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-PUB-VAL-FAIL"
+
+        def failing_val():
+            raise ValidationError("Injected published validation failure")
+
+        tx = RunTransaction(self.repo, run_id)
+
+        # Stage files first
+        self.repo.mkdir(parents=True, exist_ok=True)
+        tx.stage_record_path.parent.mkdir(parents=True, exist_ok=True)
+        tx.stage_record_path.write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        tx.stage_dir_path.mkdir(parents=True, exist_ok=True)
+        (tx.stage_dir_path / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        (tx.stage_dir_path / "events.jsonl").write_text("{}\n", encoding="utf-8")
+        (tx.stage_dir_path / "metadata.yaml").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+
+        from vibeskills_runner.run_transaction import compute_file_sha256
+        hashes = {
+            "record": compute_file_sha256(tx.stage_record_path),
+            "journal": compute_file_sha256(tx.stage_dir_path / "events.jsonl"),
+            "metadata": compute_file_sha256(tx.stage_dir_path / "metadata.yaml"),
+        }
+
+        with self.assertRaises(ValidationError):
+            tx.execute_promotion(hashes, validate_published=failing_val)
+
+        # Marker should remain on disk
+        self.assertTrue(tx.marker_path.exists())
+
+    def test_cleanup_failures_separately(self) -> None:
+        self.approve_contract()
+
+        # 1. stage_marker cleanup failure
+        run_id1 = "RUN-CLEANUP-STAGE-FAIL"
+        self.init_valid_run(run_id1)
+        tx1 = RunTransaction(self.repo, run_id1)
+        (tx1.final_dir_path / ".stage_marker").write_text("stage", encoding="utf-8")
+
+        def fail_unlink_stage_marker(self_path, *args, **kwargs):
+            if ".stage_marker" in str(self_path):
+                raise OSError("Simulated .stage_marker deletion failure")
+            return Path.unlink(self_path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", fail_unlink_stage_marker):
+            with self.assertRaises(PersistenceError):
+                tx1.cleanup_transaction()
+
+        # 2. transaction marker cleanup failure
+        run_id2 = "RUN-CLEANUP-MARKER-FAIL"
+        self.init_valid_run(run_id2)
+        tx2 = RunTransaction(self.repo, run_id2)
+        tx2.write_transaction_phase("COMPLETE", {
+            "record": "a"*64, "journal": "b"*64, "metadata": "c"*64
+        })
+
+        def fail_unlink_tx_marker(self_path, *args, **kwargs):
+            if ".transaction.yaml" in str(self_path):
+                raise OSError("Simulated transaction marker deletion failure")
+            return Path.unlink(self_path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", fail_unlink_tx_marker):
+            with self.assertRaises(PersistenceError):
+                tx2.cleanup_transaction()
+
+    def test_lock_release_failure_chaining(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-LOCK-REL-FAIL"
+
+        from vibeskills_runner.run_transaction import RunLock
+
+        def fail_unlink(self_path, *args, **kwargs):
+            raise OSError("Simulated lock file unlink failure")
+
+        with patch.object(Path, "unlink", fail_unlink):
+            with self.assertRaises(PersistenceError) as ctx:
+                with RunLock(self.repo, run_id):
+                    raise RuntimeError("Primary operation error")
+
+            self.assertIsNotNone(ctx.exception.__cause__)
+            self.assertEqual(str(ctx.exception.__cause__), "Primary operation error")
+
+    def test_stderr_overflow_limit(self) -> None:
+        from vibeskills_runner.validator_bridge import run_isolated_python, get_isolated_env
+        import sys
+
+        env = get_isolated_env(set())
+        cmd = [sys.executable, "-c", "import sys; sys.stderr.write('B' * (1024 * 1024 + 100))"]
+        with self.assertRaises(ValidationError) as ctx:
+            run_isolated_python(cmd, cwd=self.repo, env=env, max_stderr_bytes=1024 * 1024)
+        self.assertIn("overflow", str(ctx.exception))
+
+    def test_separate_environment_allowlists(self) -> None:
+        from vibeskills_runner.validator_bridge import get_isolated_env
+
+        os.environ["VIBESKILLS_APPROVAL_HMAC_KEY"] = "app-key"
+        os.environ["VIBESKILLS_RUN_HMAC_KEY"] = "run-key"
+
+        env_none = get_isolated_env(set())
+        self.assertNotIn("VIBESKILLS_APPROVAL_HMAC_KEY", env_none)
+        self.assertNotIn("VIBESKILLS_RUN_HMAC_KEY", env_none)
+
+        env_app = get_isolated_env({"VIBESKILLS_APPROVAL_HMAC_KEY"})
+        self.assertEqual(env_app["VIBESKILLS_APPROVAL_HMAC_KEY"], "app-key")
+        self.assertNotIn("VIBESKILLS_RUN_HMAC_KEY", env_app)
+
+        env_both = get_isolated_env({"VIBESKILLS_APPROVAL_HMAC_KEY", "VIBESKILLS_RUN_HMAC_KEY"})
+        self.assertEqual(env_both["VIBESKILLS_APPROVAL_HMAC_KEY"], "app-key")
+        self.assertEqual(env_both["VIBESKILLS_RUN_HMAC_KEY"], "run-key")
+
+    def test_extra_stdout_contract_hash_worker(self) -> None:
+        from vibeskills_runner.validator_bridge import run_contract_payload_sha256, IsolatedProcessResult
+
+        mock_res = IsolatedProcessResult(0, "a" * 64 + "\nextra line output\n", "")
+        with patch("vibeskills_runner.validator_bridge.run_isolated_python", return_value=mock_res):
+            with self.assertRaises(ValidationError) as ctx:
+                run_contract_payload_sha256({"contract_id": "c1"}, ROOT / "scripts")
+            self.assertIn("unexpected extra lines", str(ctx.exception))
+
+    def test_dirty_tree_whitespace_preservation(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-DIRTY-SPACE"
+        self.init_valid_run(run_id)
+
+        # Create dirty file with leading/trailing spaces
+        dirty_file = self.repo / "  dirty_file_with_spaces.txt  "
+        dirty_file.write_text("content", encoding="utf-8")
+
+        from vibeskills_runner.run_service import check_dirty_worktree
+        with self.assertRaises(ValidationError) as ctx:
+            check_dirty_worktree(self.repo)
+
+        self.assertIn("  dirty_file_with_spaces.txt  ", str(ctx.exception))
+        dirty_file.unlink()

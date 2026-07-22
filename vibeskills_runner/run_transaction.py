@@ -46,9 +46,9 @@ class RunLock:
     """Acquires a concurrency lock for a specific run ID using a context manager."""
 
     def __init__(self, repo_root: Path, run_id: str):
-        self.repo_root = repo_root.resolve()
+        self.repo_root = Path(repo_root)
         self.run_id = run_id
-        self.lock_path = (self.repo_root / f".ai/runs/{run_id}.lock").resolve()
+        self.lock_path = self.repo_root / f".ai/runs/{run_id}.lock"
         self.acquired = False
         self.nonce: Optional[str] = None
 
@@ -61,6 +61,19 @@ class RunLock:
             raise ValidationError(f"Security breach: '{runs_dir}' is a symbolic link.")
         if self.lock_path.is_symlink() or os.path.islink(str(self.lock_path)):
             raise ValidationError(f"Security breach: Lock path '{self.lock_path}' is a symbolic link.")
+
+        try:
+            rel_parts = self.lock_path.relative_to(self.repo_root).parts
+            check_path = self.repo_root
+            for part in rel_parts:
+                check_path = check_path / part
+                if check_path.is_symlink() or os.path.islink(str(check_path)):
+                    raise ValidationError(f"Security breach: Path component '{check_path}' is a symbolic link.")
+        except ValueError as exc:
+            raise ValidationError(
+                f"Security breach attempt: lock path '{self.lock_path}' escapes repository root."
+            ) from exc
+
         try:
             self.lock_path.resolve().relative_to(runs_dir.resolve())
         except ValueError as exc:
@@ -138,15 +151,15 @@ class RunTransaction:
     """Manages multi-stage atomic promotion transactions and verification-driven recovery."""
 
     def __init__(self, repo_root: Path, run_id: str):
-        self.repo_root = repo_root.resolve()
+        self.repo_root = Path(repo_root)
         self.run_id = run_id
 
-        # Compute canonical paths strictly inside runs directory
-        self.final_record_path = (self.repo_root / f".ai/runs/{run_id}.yaml").resolve()
-        self.final_dir_path = (self.repo_root / f".ai/runs/{run_id}").resolve()
-        self.stage_record_path = (self.repo_root / f".ai/runs/{run_id}.yaml.stage").resolve()
-        self.stage_dir_path = (self.repo_root / f".ai/runs/{run_id}.stage").resolve()
-        self.marker_path = (self.repo_root / f".ai/runs/{run_id}.transaction.yaml").resolve()
+        # Lexical paths inside runs directory
+        self.final_record_path = self.repo_root / f".ai/runs/{run_id}.yaml"
+        self.final_dir_path = self.repo_root / f".ai/runs/{run_id}"
+        self.stage_record_path = self.repo_root / f".ai/runs/{run_id}.yaml.stage"
+        self.stage_dir_path = self.repo_root / f".ai/runs/{run_id}.stage"
+        self.marker_path = self.repo_root / f".ai/runs/{run_id}.transaction.yaml"
 
     def verify_path_confinement(self, path: Path) -> None:
         """Verify that path lies strictly within .ai/runs/ and contains no symlinks."""
@@ -158,6 +171,18 @@ class RunTransaction:
             raise ValidationError(f"Security breach: '{runs_dir}' is a symbolic link.")
         if path.is_symlink() or os.path.islink(str(path)):
             raise ValidationError(f"Security breach: Path '{path}' is a symbolic link.")
+
+        try:
+            rel_parts = path.relative_to(self.repo_root).parts
+            check_path = self.repo_root
+            for part in rel_parts:
+                check_path = check_path / part
+                if check_path.is_symlink() or os.path.islink(str(check_path)):
+                    raise ValidationError(f"Security breach: Path component '{check_path}' is a symbolic link.")
+        except ValueError as exc:
+            raise ValidationError(
+                f"Security breach attempt: path '{path}' escapes repository root."
+            ) from exc
 
         try:
             path.resolve().relative_to(runs_dir.resolve())
@@ -399,7 +424,11 @@ class RunTransaction:
                 raise ValidationError("Marker phase 'RECORD_PROMOTED' is incompatible with filesystem topology.")
 
         elif phase_val == TransactionPhase.COMPLETE.value:
-            if final_rec and final_dir:
+            if final_rec and final_dir and not stage_rec and not stage_dir:
+                if not self.verify_record_integrity(self.final_record_path, hashes):
+                    raise ValidationError("Final record integrity check failed for COMPLETE transaction marker.")
+                if not self.verify_dir_integrity(self.final_dir_path, hashes):
+                    raise ValidationError("Final directory integrity check failed for COMPLETE transaction marker.")
                 if validate_published:
                     validate_published()
                 self.cleanup_transaction()

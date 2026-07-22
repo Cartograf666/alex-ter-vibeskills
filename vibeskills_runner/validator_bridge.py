@@ -17,16 +17,33 @@ SHA256_REGEX = re.compile(r"^[0-9a-f]{64}$")
 
 
 def get_site_packages_dir() -> str:
-    """Resolve system site-packages directory containing jsonschema and other dependencies."""
+    """Resolve system site-packages directory containing jsonschema without trusting sys.modules."""
     try:
-        import jsonschema
+        import importlib.util
 
-        return str(Path(jsonschema.__file__).resolve().parent.parent)
-    except ImportError:
+        spec = importlib.util.find_spec("jsonschema")
+        if spec and spec.origin:
+            return str(Path(spec.origin).resolve().parent.parent)
+    except Exception:
+        pass
+    try:
+        import site
+
+        site_pkgs = site.getsitepackages()
+        if site_pkgs:
+            for p in site_pkgs:
+                if Path(p).is_dir():
+                    return str(Path(p).resolve())
+    except Exception:
         pass
     for p in sys.path:
-        if "site-packages" in p:
-            return p
+        if "site-packages" in p or "dist-packages" in p:
+            try:
+                resolved_p = Path(p).resolve()
+                if resolved_p.is_dir():
+                    return str(resolved_p)
+            except Exception:
+                pass
     return ""
 
 
@@ -298,7 +315,10 @@ def run_contract_payload_sha256(
         if res.returncode != 0:
             raise ValidationError(f"Contract hashing worker failed: {res.stderr.strip()}")
 
-        out = res.stdout.strip()
+        out_lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        if len(out_lines) != 1:
+            raise ValidationError(f"Contract hashing worker output contains unexpected extra lines: '{res.stdout}'")
+        out = out_lines[0]
         if not SHA256_REGEX.match(out):
             raise ValidationError(f"Contract hashing worker output invalid: '{out}'")
 

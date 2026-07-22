@@ -80,31 +80,10 @@ def validate_contract_helper(
     if not isinstance(contract, dict):
         raise ValidationError("Contract must be a YAML mapping")
 
-    # Validate against JSON schema first
-    schema_path = TRUSTED_SCHEMAS_DIR / "development-contract.schema.json"
-    if not schema_path.is_file():
-        raise ValidationError(f"Contract schema not found: {schema_path}")
-
-    try:
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise ValidationError(f"Failed to load contract schema: {exc}") from exc
-
-    errors = []
-    from jsonschema import Draft202012Validator, FormatChecker
-
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    for item in sorted(validator.iter_errors(contract), key=lambda err: list(err.path)):
-        location = ".".join(str(part) for part in item.path) or "<root>"
-        errors.append(f"{location}: {item.message}")
-
-    if not errors:
-        # Run semantics checks using validator bridge
-        errors.extend(
-            run_validate_semantics(
-                contract, repository, TRUSTED_SCRIPTS_DIR, TRUSTED_SCHEMAS_DIR
-            )
-        )
+    # Run schema and semantics validation exclusively using isolated validator bridge
+    errors = run_validate_semantics(
+        contract, repository, TRUSTED_SCRIPTS_DIR, TRUSTED_SCHEMAS_DIR
+    )
 
     if errors:
         raise ValidationError(
@@ -182,7 +161,7 @@ def check_dirty_worktree(repository: Path) -> None:
             normalized = path_str.replace("\\", "/")
             if normalized.startswith(".ai/runs/"):
                 continue
-            dirty_files.append(path_str.strip())
+            dirty_files.append(path_str)
 
         if dirty_files:
             raise ValidationError(
