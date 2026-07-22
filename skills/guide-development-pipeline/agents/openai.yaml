@@ -1,0 +1,4 @@
+interface:
+  display_name: "Guide the Pipeline"
+  short_description: "Find the current stage and name the next step"
+  default_prompt: "Use $guide-development-pipeline to inspect the .ai/ artifacts, tell me which pipeline stage this project is in, and name the single next step."
