@@ -6,10 +6,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
 from vibeskills_runner.errors import ValidationError, PersistenceError
+from vibeskills_runner.run_transaction import RunTransaction
 from vibeskills_runner.run_service import (
     init_run,
     get_status,
@@ -26,6 +28,11 @@ def run_git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], cwd=cwd, text=True, capture_output=True, check=True
     )
+
+
+_orig_promote_directory = RunTransaction.promote_directory
+_orig_promote_record = RunTransaction.promote_record
+_orig_cleanup_transaction = RunTransaction.cleanup_transaction
 
 
 class TestRunnerAdversarial(unittest.TestCase):
@@ -290,9 +297,6 @@ class TestRunnerAdversarial(unittest.TestCase):
         self.approve_contract()
         run_id = "RUN-INTERRUPTED"
 
-        # We can trigger error during initialization by making the runs folder read-only or similar,
-        # or we can test that leftover staging files from interrupted run are cleaned up.
-        # Let's write leftover staging files
         stage_record = self.repo / f".ai/runs/{run_id}.yaml.stage"
         stage_dir = self.repo / f".ai/runs/{run_id}.stage"
         stage_record.parent.mkdir(parents=True, exist_ok=True)
@@ -300,7 +304,31 @@ class TestRunnerAdversarial(unittest.TestCase):
         stage_dir.mkdir(parents=True, exist_ok=True)
         (stage_dir / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
 
-        # Now, call init_run. It should clean them up and succeed!
+        # Without transaction marker, init_run must fail closed (cannot delete markerless staging)
+        with self.assertRaises(ValidationError):
+            self.init_valid_run(run_id)
+
+        # Staging files must remain untouched
+        self.assertTrue(stage_record.exists())
+        self.assertTrue(stage_dir.exists())
+
+        # Now write a valid transaction marker with STAGED phase and hashes
+        from vibeskills_runner.run_transaction import RunTransaction, compute_file_sha256
+        tx_test = RunTransaction(self.repo, run_id)
+        events_file = stage_dir / "events.jsonl"
+        events_file.write_text("{}\n", encoding="utf-8")
+        meta_file = stage_dir / "metadata.yaml"
+        meta_file.write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+
+        hashes = {
+            "record": compute_file_sha256(stage_record),
+            "journal": compute_file_sha256(events_file),
+            "metadata": compute_file_sha256(meta_file),
+        }
+
+        tx_test.write_transaction_phase("STAGED", hashes)
+
+        # Now, call init_run. It should rollback staging and initialize successfully
         self.init_valid_run(run_id)
 
         # Check final files exist, staging files are deleted
@@ -534,58 +562,137 @@ class TestRunnerAdversarial(unittest.TestCase):
         with self.assertRaises(ValidationError):
             resume_run(self.repo, run_id)
 
-    def test_promotion_failures_recovery(self) -> None:
+    @patch("vibeskills_runner.run_transaction.RunTransaction.promote_directory", autospec=True)
+    def test_first_rename_failure(self, mock_promote) -> None:
         self.approve_contract()
-        run_id = "RUN-PROMOTION-FAIL"
+        raise_error = True
 
-        # 1. Simulate Failure between rename 1 and rename 2 (Dir renamed, Record stage left)
-        # We write stage record and final directory.
-        stage_record_path = self.repo / f".ai/runs/{run_id}.yaml.stage"
-        final_dir_path = self.repo / f".ai/runs/{run_id}"
+        def side_effect(self_tx):
+            if raise_error:
+                raise OSError("First rename failed")
+            _orig_promote_directory(self_tx)
 
-        stage_record_path.parent.mkdir(parents=True, exist_ok=True)
-        final_dir_path.mkdir(parents=True, exist_ok=True)
+        mock_promote.side_effect = side_effect
+        run_id = "RUN-FIRST-FAIL"
 
-        # Add metadata and stage markers to prove they are managed
-        stage_record_path.write_text(yaml.safe_dump({
-            "run_id": run_id,
-            "contract_id": "my-contract",
-            "contract_payload_sha256": "hash",
-            "state": "DISCOVER",
-            "base_revision": "rev",
-            "current_revision": "rev",
-            "current_tree_sha256": "tree",
-            "roles": [{"role": "manager", "provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-01"}]
-        }), encoding="utf-8")
+        with self.assertRaises((PersistenceError, OSError)):
+            init_run(
+                self.repo,
+                ".ai/specs/my-slug/development-contract.yaml",
+                run_id,
+                "anthropic",
+                "opus",
+                "1.0",
+                "manager-ctx-01"
+            )
 
-        (final_dir_path / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
-        (final_dir_path / "metadata.yaml").write_text(yaml.safe_dump({
-            "run_id": run_id,
-            "contract_id": "my-contract",
-            "manager": {"provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-01"}
-        }), encoding="utf-8")
+        # Reset mock side effect to allow retry promotion to succeed
+        raise_error = False
 
-        # Recovery through resume (allow_rollback = False) should complete the promotion
-        from vibeskills_runner.run_service import check_and_recover_promotion
-        check_and_recover_promotion(self.repo, run_id, allow_rollback=False)
+        init_run(
+            self.repo,
+            ".ai/specs/my-slug/development-contract.yaml",
+            run_id,
+            "anthropic",
+            "opus",
+            "1.0",
+            "manager-ctx-01"
+        )
+        self.assertTrue((self.repo / f".ai/runs/{run_id}.yaml").is_file())
+        self.assertTrue((self.repo / f".ai/runs/{run_id}").is_dir())
+
+    @patch("vibeskills_runner.run_transaction.RunTransaction.promote_record", autospec=True)
+    def test_second_rename_failure(self, mock_promote) -> None:
+        self.approve_contract()
+        raise_error = True
+
+        def side_effect(self_tx):
+            if raise_error:
+                raise OSError("Second rename failed")
+            _orig_promote_record(self_tx)
+
+        mock_promote.side_effect = side_effect
+        run_id = "RUN-SECOND-FAIL"
+
+        with self.assertRaises((PersistenceError, OSError)):
+            init_run(
+                self.repo,
+                ".ai/specs/my-slug/development-contract.yaml",
+                run_id,
+                "anthropic",
+                "opus",
+                "1.0",
+                "manager-ctx-01"
+            )
+
+        # Reset mock side effect to allow resume to succeed
+        raise_error = False
+
+        resume_run(self.repo, run_id)
 
         self.assertTrue((self.repo / f".ai/runs/{run_id}.yaml").is_file())
-        self.assertTrue(final_dir_path.is_dir())
-        self.assertFalse(stage_record_path.exists())
+        self.assertTrue((self.repo / f".ai/runs/{run_id}").is_dir())
+        self.assertFalse((self.repo / f".ai/runs/{run_id}.yaml.stage").exists())
 
-        # Clean up
-        (self.repo / f".ai/runs/{run_id}.yaml").unlink()
-        shutil.rmtree(final_dir_path)
+    def test_marker_phase_write_failure(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-PHASE-FAIL"
 
-        # 2. Simulate same failure, but init_run (allow_rollback = True) should clean/rollback
-        stage_record_path.write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
-        final_dir_path.mkdir(parents=True, exist_ok=True)
-        (final_dir_path / ".stage_marker").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
-        (final_dir_path / "metadata.yaml").write_text(yaml.safe_dump({"run_id": run_id}), encoding="utf-8")
+        from vibeskills_runner.run_transaction import RunTransaction
+        original_write_phase = RunTransaction.write_transaction_phase
 
-        check_and_recover_promotion(self.repo, run_id, allow_rollback=True)
-        self.assertFalse(stage_record_path.exists())
-        self.assertFalse(final_dir_path.exists())
+        def side_effect(self_tx, phase, hashes):
+            if phase == "DIRECTORY_PROMOTED":
+                raise OSError("Write phase failed")
+            original_write_phase(self_tx, phase, hashes)
+
+        with patch.object(RunTransaction, "write_transaction_phase", side_effect):
+            with self.assertRaises((PersistenceError, OSError)):
+                init_run(
+                    self.repo,
+                    ".ai/specs/my-slug/development-contract.yaml",
+                    run_id,
+                    "anthropic",
+                    "opus",
+                    "1.0",
+                    "manager-ctx-01"
+                )
+
+        # Outside the with-block, the mock is removed. Call resume_run to complete.
+        resume_run(self.repo, run_id)
+
+        self.assertTrue((self.repo / f".ai/runs/{run_id}.yaml").is_file())
+        self.assertTrue((self.repo / f".ai/runs/{run_id}").is_dir())
+
+    @patch("vibeskills_runner.run_transaction.RunTransaction.cleanup_transaction", autospec=True)
+    def test_cleanup_failure(self, mock_cleanup) -> None:
+        self.approve_contract()
+        raise_error = True
+
+        def side_effect(self_tx):
+            if raise_error:
+                raise OSError("Cleanup failed")
+            _orig_cleanup_transaction(self_tx)
+
+        mock_cleanup.side_effect = side_effect
+        run_id = "RUN-CLEANUP-FAIL"
+
+        with self.assertRaises((PersistenceError, OSError)):
+            init_run(
+                self.repo,
+                ".ai/specs/my-slug/development-contract.yaml",
+                run_id,
+                "anthropic",
+                "opus",
+                "1.0",
+                "manager-ctx-01"
+            )
+
+        # Reset mock side effect to allow cleanup on resume
+        raise_error = False
+
+        resume_run(self.repo, run_id)
+        self.assertFalse((self.repo / f".ai/runs/{run_id}.transaction.yaml").exists())
 
     def test_dirty_tree_validation(self) -> None:
         self.approve_contract()
@@ -605,3 +712,290 @@ class TestRunnerAdversarial(unittest.TestCase):
 
         # resume should succeed now
         resume_run(self.repo, run_id)
+
+    def test_staged_rename_outside_runs(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-STAGED-RENAME"
+        self.init_valid_run(run_id)
+
+        # Create a file inside .ai/runs/
+        source_file = self.repo / f".ai/runs/{run_id}/source.py"
+        source_file.write_text("print('hello')", encoding="utf-8")
+
+        # Commit it so it is tracked
+        run_git("add", str(source_file), cwd=self.repo)
+        run_git("commit", "-m", "add source file", cwd=self.repo)
+
+        # Do a staged git rename outside runs
+        target_file = self.repo / "outside.py"
+        run_git("mv", str(source_file), str(target_file), cwd=self.repo)
+
+        # resume_run must fail because of dirty tree (file renamed outside runs)
+        try:
+            with self.assertRaises(ValidationError):
+                resume_run(self.repo, run_id)
+        finally:
+            # Clean up repo state
+            run_git("reset", "HEAD", "--hard", cwd=self.repo)
+            run_git("reset", "HEAD^", "--hard", cwd=self.repo)
+
+    def test_malicious_local_modules_ignored(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-MALICIOUS-MODULES"
+
+        # Create malicious validate_contract.py and hmac.py in repo root
+        mal_val = self.repo / "validate_contract.py"
+        mal_val.write_text("raise Exception('Malicious validate_contract loaded!')\n", encoding="utf-8")
+
+        mal_hmac = self.repo / "hmac.py"
+        sentinel_path = self.repo / "hmac_sentinel.txt"
+        mal_hmac.write_text(
+            f"from pathlib import Path\nPath('{sentinel_path}').write_text('poisoned')\nraise Exception('Malicious hmac loaded!')\n",
+            encoding="utf-8"
+        )
+
+        # init_run should ignore the local malicious validate_contract and hmac files due to PYTHONSAFEPATH=1
+        init_run(
+            self.repo,
+            ".ai/specs/my-slug/development-contract.yaml",
+            run_id,
+            "anthropic",
+            "opus",
+            "1.0",
+            "manager-ctx-01"
+        )
+
+        # Verify successful initialization and no sentinel creation
+        self.assertTrue((self.repo / f".ai/runs/{run_id}.yaml").is_file())
+        self.assertFalse(sentinel_path.exists())
+
+    def test_missing_duplicate_manager(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-BAD-MANAGER"
+        self.init_valid_run(run_id)
+
+        record_path = self.repo / f".ai/runs/{run_id}.yaml"
+        record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+
+        # Scenario 1: Zero manager roles
+        record["roles"] = []
+        record_path.write_text(yaml.safe_dump(record), encoding="utf-8")
+
+        with self.assertRaises(ValidationError):
+            resume_run(self.repo, run_id)
+
+        # Scenario 2: Two manager roles
+        record["roles"] = [
+            {"role": "manager", "provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-01"},
+            {"role": "manager", "provider": "anthropic", "model": "opus", "model_version": "1.0", "context_id": "manager-ctx-02"}
+        ]
+        record_path.write_text(yaml.safe_dump(record), encoding="utf-8")
+
+        with self.assertRaises(ValidationError):
+            resume_run(self.repo, run_id)
+
+    def test_transaction_path_tampering(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-TAMPER-PATH"
+
+        from vibeskills_runner.run_transaction import RunTransaction
+
+        original_execute = RunTransaction.execute_promotion
+
+        def tampered_execute(self_tx, hashes, *args, **kwargs):
+            self_tx.write_marker("STAGED", hashes)
+            # Tamper the marker file to reference an escaped directory path
+            marker_path = self_tx.marker_path
+            marker_data = yaml.safe_load(marker_path.read_text(encoding="utf-8"))
+            marker_data["stage_dir_path"] = "/tmp/escaped"
+            marker_path.write_text(yaml.safe_dump(marker_data), encoding="utf-8")
+
+            self_tx.promote_directory()
+            self_tx.promote_record()
+
+        with patch.object(RunTransaction, "execute_promotion", tampered_execute):
+            init_run(
+                self.repo,
+                ".ai/specs/my-slug/development-contract.yaml",
+                run_id,
+                "anthropic",
+                "opus",
+                "1.0",
+                "manager-ctx-01"
+            )
+
+        # Calling resume_run should trigger recover, detect the path tampering, and fail-closed
+        with self.assertRaises(ValidationError):
+            resume_run(self.repo, run_id)
+
+    def test_manager_identity_validation(self) -> None:
+        self.approve_contract()
+        contract_rel = ".ai/specs/my-slug/development-contract.yaml"
+
+        invalid_params_list = [
+            ("", "opus", "1.0", "ctx-01"),
+            ("anthropic", "  ", "1.0", "ctx-01"),
+            ("anthropic", "opus", "", "ctx-01"),
+            ("anthropic", "opus", "1.0", "   "),
+        ]
+
+        for i, (prov, mod, ver, ctx) in enumerate(invalid_params_list):
+            run_id = f"RUN-BAD-MGR-{i}"
+            with self.assertRaises(ValidationError):
+                init_run(self.repo, contract_rel, run_id, prov, mod, ver, ctx)
+
+            # Assert zero files left on disk
+            for p in [
+                self.repo / f".ai/runs/{run_id}.yaml",
+                self.repo / f".ai/runs/{run_id}",
+                self.repo / f".ai/runs/{run_id}.yaml.stage",
+                self.repo / f".ai/runs/{run_id}.stage",
+                self.repo / f".ai/runs/{run_id}.transaction.yaml",
+                self.repo / f".ai/runs/{run_id}.lock",
+            ]:
+                self.assertFalse(p.exists(), f"Leftover file found: {p}")
+
+    def test_lock_protocol_security(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-LOCK-TEST"
+
+        from vibeskills_runner.run_transaction import RunLock
+
+        # 1. Lock acquisition & duplicate lock rejection
+        lock1 = RunLock(self.repo, run_id)
+        lock1.acquire()
+        self.assertTrue(lock1.acquired)
+
+        lock2 = RunLock(self.repo, run_id)
+        with self.assertRaises(ValidationError):
+            lock2.acquire()
+
+        # 2. Independent run IDs can lock concurrently
+        lock_other = RunLock(self.repo, "RUN-OTHER-LOCK")
+        lock_other.acquire()
+        self.assertTrue(lock_other.acquired)
+        lock_other.release()
+
+        # 3. Nonce tampering prevents releasing someone else's lock
+        lock1.lock_path.write_text(yaml.safe_dump({"run_id": run_id, "nonce": "tampered-nonce"}), encoding="utf-8")
+        with self.assertRaises(ValidationError):
+            lock1.release()
+
+        # Clean up lock file
+        if lock1.lock_path.exists():
+            lock1.lock_path.unlink()
+
+        # 4. Context manager releases lock on success and error
+        with RunLock(self.repo, run_id) as l:
+            self.assertTrue(l.acquired)
+        self.assertFalse((self.repo / f".ai/runs/{run_id}.lock").exists())
+
+        try:
+            with RunLock(self.repo, run_id) as l:
+                raise RuntimeError("Operation error inside lock context")
+        except RuntimeError:
+            pass
+        self.assertFalse((self.repo / f".ai/runs/{run_id}.lock").exists())
+
+        # 5. Stale lock blocks execution
+        stale_lock = self.repo / f".ai/runs/{run_id}.lock"
+        stale_lock.write_text(yaml.safe_dump({"run_id": run_id, "nonce": "old"}), encoding="utf-8")
+        with self.assertRaises(ValidationError):
+            self.init_valid_run(run_id)
+        stale_lock.unlink()
+
+    def test_symlink_attacks_matrix(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-SYMLINK-TEST"
+        sentinel = Path(tempfile.gettempdir()) / "vibeskills_symlink_sentinel.txt"
+        if sentinel.exists():
+            sentinel.unlink()
+
+        sentinel.write_text("sentinel content", encoding="utf-8")
+
+        try:
+            # 1. stage record is a symlink
+            stage_rec = self.repo / f".ai/runs/{run_id}.yaml.stage"
+            stage_rec.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(sentinel, stage_rec)
+
+            with self.assertRaises(ValidationError):
+                self.init_valid_run(run_id)
+            stage_rec.unlink()
+
+            # 2. lock file is a symlink
+            lock_path = self.repo / f".ai/runs/{run_id}.lock"
+            os.symlink(sentinel, lock_path)
+
+            with self.assertRaises(ValidationError):
+                self.init_valid_run(run_id)
+            lock_path.unlink()
+
+            # 3. transaction marker is a symlink
+            marker_path = self.repo / f".ai/runs/{run_id}.transaction.yaml"
+            os.symlink(sentinel, marker_path)
+
+            with self.assertRaises(ValidationError):
+                self.init_valid_run(run_id)
+            marker_path.unlink()
+
+            # Sentinel file must remain completely unmodified
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "sentinel content")
+        finally:
+            if sentinel.exists():
+                sentinel.unlink()
+
+    def test_subprocess_isolation_and_limits(self) -> None:
+        from vibeskills_runner.validator_bridge import run_isolated_python, get_isolated_env
+        import sys
+
+        # 1. Environment allowlist filtering
+        os.environ["SECRET_AWS_KEY"] = "super-secret"
+        os.environ["VIBESKILLS_APPROVAL_HMAC_KEY"] = "approval-secret"
+        env = get_isolated_env({"VIBESKILLS_APPROVAL_HMAC_KEY"})
+        self.assertNotIn("SECRET_AWS_KEY", env)
+        self.assertEqual(env["VIBESKILLS_APPROVAL_HMAC_KEY"], "approval-secret")
+        self.assertEqual(env["PYTHONNOUSERSITE"], "1")
+        self.assertEqual(env["PYTHONSAFEPATH"], "1")
+
+        # 2. Subprocess timeout kills child process
+        cmd_timeout = [sys.executable, "-c", "import time; time.sleep(20)"]
+        with self.assertRaises(ValidationError) as ctx:
+            run_isolated_python(cmd_timeout, cwd=self.repo, env=env, timeout_seconds=0.2)
+        self.assertIn("timed out", str(ctx.exception))
+
+        # 3. Output stream overflow (>1 MiB) rejected
+        cmd_overflow = [sys.executable, "-c", "print('A' * (1024 * 1024 + 100))"]
+        with self.assertRaises(ValidationError) as ctx:
+            run_isolated_python(cmd_overflow, cwd=self.repo, env=env, max_stdout_bytes=1024 * 1024)
+        self.assertIn("overflow", str(ctx.exception))
+
+    def test_transaction_fault_injection_matrix(self) -> None:
+        self.approve_contract()
+        run_id = "RUN-FAULT-MATRIX"
+
+        from vibeskills_runner.run_transaction import RunTransaction, TransactionPhase
+
+        # Test failure of promote_directory during execute_promotion
+        def failing_promote_directory(self_tx):
+            raise OSError("Injected directory promote failure")
+
+        with patch.object(RunTransaction, "promote_directory", failing_promote_directory):
+            with self.assertRaises(Exception):
+                self.init_valid_run(run_id)
+
+        # Check phase and topology after failure
+        tx = RunTransaction(self.repo, run_id)
+        self.assertTrue(tx.marker_path.exists())
+        marker_data = yaml.safe_load(tx.marker_path.read_text(encoding="utf-8"))
+        self.assertEqual(marker_data["phase"], TransactionPhase.STAGED.value)
+        self.assertTrue(tx.stage_record_path.exists())
+        self.assertTrue(tx.stage_dir_path.exists())
+        self.assertFalse(tx.final_record_path.exists())
+        self.assertFalse(tx.final_dir_path.exists())
+
+        # Calling resume_run should recover from STAGED phase to completion!
+        resume_run(self.repo, run_id)
+        self.assertTrue(tx.final_record_path.exists())
+        self.assertTrue(tx.final_dir_path.exists())
+        self.assertFalse(tx.marker_path.exists())

@@ -1,83 +1,118 @@
 # Vibeskills Runner (Alpha Kernel)
 
 > [!WARNING]
-> The `vibeskills-runner` is currently in **alpha** and implements only the core foundation/kernel. It does not execute language models (such as Claude, Gemini, or Codex), run production code writers, perform sandbox containment, or execute automated quality gates.
+> The `vibeskills-runner` is currently in **alpha** and implements only the core foundation/kernel. It does not execute language models (such as Claude, Gemini, or Codex), run production code writers, perform sandbox containment, or execute automated quality gates (Phase 5 functions).
 
 The kernel is responsible for:
-1. Validating development contracts via the project's existing validators.
-2. Initializing safe, schema-compliant run records.
+1. Validating development contracts via trusted isolated subprocesses.
+2. Initializing safe, schema-compliant run records using atomic multi-stage promotion.
 3. Keeping a monotonic event transition log.
 4. Ensuring atomic file storage of the state and journal to prevent corruptions.
 5. Verifying that all state transitions follow the governance state machine.
+6. Reconciling transaction markers, filesystem topology, and file SHA-256 hashes during recovery.
 
-Subsequent implementation phases will introduce provider execution adapters, automated writer processes, and gate integration.
+---
 
-## Locations
+## Storage Locations
 
 - **Run Record File**: `.ai/runs/<run-id>.yaml` (Must conform to `run-record.schema.json`)
 - **Event Journal**: `.ai/runs/<run-id>/events.jsonl` (Append-only JSON lines log)
 - **Runtime Metadata**: `.ai/runs/<run-id>/metadata.yaml`
+- **Transaction Marker**: `.ai/runs/<run-id>.transaction.yaml`
+- **Run Lock File**: `.ai/runs/<run-id>.lock`
 
 ---
 
-## Trust Boundary & Threat Model
+## Subprocess-Only Trust Boundary & Security Architecture
 
-### Trust Boundary
+### Subprocess Trust Boundary
 
 The runner defines a strict trust boundary at the target repository perimeter. The target repository (`--repository`) is treated as untrusted data.
-- **No Script Execution**: The runner never imports or executes Python scripts from the target repository.
-- **Trusted Toolkit**: The runner exclusively utilizes schemas and validator scripts located within the trusted toolkit installation directory (determined relative to `vibeskills_runner/__file__`).
+- **No Direct Import**: The runner never imports Python scripts or modules from the target repository.
+- **Trusted Subprocesses**: Validator scripts, schemas, and helper workers are executed exclusively as isolated Python subprocesses (`sys.executable`) from the trusted toolkit directory (`TRUSTED_ROOT`).
+- **Bounded Subprocess Execution**: Subprocesses are executed with `shell=False`, `cwd=TRUSTED_ROOT`, a strict 10-second timeout, 1 MiB per-stream output limits (stdout and stderr), non-blocking pipe draining, and child process killing on timeout or overflow.
 
-### Threat Model
+### Environment Allowlisting
 
-The kernel mitigates several attack vectors:
+Subprocesses do not inherit the host environment. Each tool receives a minimal allowlisted environment:
+- **Hash Worker**: Receives no HMAC secrets (`VIBESKILLS_*` keys stripped).
+- **Contract Validator**: Receives only `VIBESKILLS_APPROVAL_HMAC_KEY` and `VIBESKILLS_APPROVAL_HMAC_KEYS`.
+- **Run-Record Validator**: Receives only `VIBESKILLS_APPROVAL_HMAC_KEY(S)` and `VIBESKILLS_RUN_HMAC_KEY(S)`.
+- **Python Flags**: All subprocesses enforce `PYTHONNOUSERSITE=1`, `PYTHONSAFEPATH=1`, and `PYTHONDONTWRITEBYTECODE=1`. Cloud credentials, provider API keys, and arbitrary environment variables are never passed.
 
-| Threat | Attack Vector | Mitigation |
+---
+
+## Transaction Phase State Machine & Staging Ownership
+
+### Transaction Phases
+
+Promotion transactions proceed through explicit, monotonic phases:
+1. `STAGED`: Staging files (`.yaml.stage` and `.stage/`) created and validated.
+2. `DIRECTORY_PROMOTED`: Staging directory renamed to final directory (`.ai/runs/<run_id>/`).
+3. `RECORD_PROMOTED`: Staging record renamed to final record (`.ai/runs/<run_id>.yaml`).
+4. `COMPLETE`: Full published run integrity validation succeeded; marker updated to `COMPLETE`.
+5. `Controlled Cleanup`: `.stage_marker` unlinked from final directory, transaction marker unlinked last.
+
+### Marker & Topology Reconciliation Matrix
+
+During `resume` or recovery, the runner reconciles `marker.phase`, file topology, SHA-256 hashes, and `.stage_marker`:
+
+| Marker Phase | Filesystem Topology | Allowed Recovery Action |
 | :--- | :--- | :--- |
-| **Malicious Target Code** | An attacker injects a rogue `scripts/validate_contract.py` or `scripts/validate_run_record.py` into the target repository to hijack the validation process. | The runner imports and calls validators exclusively from the trusted toolkit directory, ignoring the target repository's local scripts. |
-| **Path Traversal** | Malicious paths (e.g. `../../etc/passwd` or outside the repo) are supplied via flags or contract inputs to read/write system files. | All target file paths are resolved using `resolve_safe_path` which strictly validates that resolved paths do not escape the repository root. |
-| **Interrupted Initialization** | An initialization process is cut short (e.g., due to power loss or write failure), leaving incomplete run record files that block the run ID. | Staging is used: all files are created under `.stage` suffixes and promoted only after full verification. Existing staging files are cleaned up on a retry. |
-| **Forged State Transitions** | A malicious agent directly edits `.ai/runs/<run-id>.yaml` to force a jump in the state machine (e.g., `START -> PLAN` or `ACCEPT -> ESCALATE`). | The state machine transition rules are strictly checked. In addition, the record's transitions ledger is compared 1-to-1 (including timestamps, actions, and reasons) with the event journal. |
-| **Mismatched Revisions** | An agent makes changes without committing, or checks out a different branch, which is then verified against the wrong state. | The `resume` command checks that the recorded `current_revision` matches repository HEAD, that the `base_revision` is a valid ancestor of HEAD, and that the `current_tree_sha256` matches the actual committed tree SHA. It also enforces that the repository worktree has no uncommitted changes (dirty tree) outside of `.ai/runs/`. |
+| `STAGED` | Stage record + Stage directory | Rollback (if `ROLLBACK_ONLY_IF_UNPUBLISHED`) or complete directory promotion |
+| `STAGED` | Stage record + Final directory | Directory rename succeeded, phase write failed -> continue record promotion |
+| `DIRECTORY_PROMOTED` | Stage record + Final directory | Perform record promotion -> validate -> COMPLETE |
+| `DIRECTORY_PROMOTED` | Final record + Final directory | Record rename succeeded, phase write failed -> validate -> COMPLETE |
+| `RECORD_PROMOTED` | Final record + Final directory | Perform full published run validation -> COMPLETE |
+| `COMPLETE` | Final record + Final directory | Execute controlled cleanup (`.stage_marker` -> marker) |
+
+> [!IMPORTANT]
+> **Rollback Rule**: Rollback is strictly allowed **only** when the topology is fully unpublished (`STAGED` phase with stage files and no final directory or record). Once directory promotion begins, rollback is forbidden and recovery can only proceed forward or stop.
+
+### Staging Ownership
+
+Staging files are owned strictly by validated transaction markers. If staging files (`.yaml.stage` or `.stage/`) exist without a valid matching transaction marker, the runner **fails closed** (`ValidationError`). Automatic markerless cleanup is disabled to prevent attackers from causing deletion of arbitrary files.
 
 ---
 
-## Storage & Atomicity Properties
+## Filesystem & Symlink Boundary Enforcement
 
-- **Atomic Record Saving**: The Run Record YAML is written atomically. The runner writes data to a temporary file in the same directory and then uses `os.replace` to replace the target file. If a write fails midway, the original record remains completely untouched.
-- **Append-only Event Journal**: The event journal (`events.jsonl`) is append-only. Appending is not fully atomic on write, but file integrity is secured by strict load-time validation that rejects corrupted JSON entries, duplicate event IDs, or non-monotonic sequence numbers.
-- **Atomic Metadata**: The `metadata.yaml` is written atomically using temporary staging files.
+Before any file reads, writes, lock acquisitions, or directory renames:
+- The runner verifies that `.ai` and `.ai/runs` are real directories and **not symbolic links** (`os.lstat()`).
+- All target paths, staging paths, lock paths, and transaction markers are checked with `is_symlink()` / `lstat()`. Symbolic links are immediately rejected with `ValidationError`.
+- Lexical and resolved path confinement checks ensure all paths remain strictly inside `.ai/runs/`.
 
 ---
 
-## Negative/Adversarial Cases Covered
+## Lock Protocol & Stale Lock Recovery
 
-The runner has explicit unit and integration tests proving rejection of:
-1. **START -> PLAN** transition (direct state bypass).
-2. **Discontinuous transition ledger** (broken transition chain).
-3. **State mismatch** (record state different from the last transition target).
-4. **Tampered transition reason** (mismatch between run record transition reason and event journal reason).
-5. **Nonexistent base_revision** (invalid Git commit reference).
-6. **Nonexistent current_revision** (invalid Git commit reference).
-7. **current_revision out of sync with HEAD** (uncommitted changes or switched branch).
-8. **Mismatched committed tree SHA** (tree contents modified).
-9. **Tampered/invalid contract** (approval hash mismatch).
-10. **Corrupted metadata or journal** (failed JSONL/YAML parsing).
-11. **Interrupted staging recovery** (correct cleanup and successful re-initialization).
-12. **Target repository scripts intrusion** (verifying that target repository's custom validation scripts are completely ignored and not executed).
-13. **Target repository missing toolkit files** (verifying that the runner works correctly even if the target repository has no `scripts/` or `schemas/` directory).
-14. **Path Traversal run ID** (e.g. `../../victim` to escape `.ai/runs/` is rejected).
-15. **Disallowed transition ledger start** (transitions not starting with `START -> DISCOVER` are rejected).
-16. **Interrupted promotion recovery** (fault injection of Step 1 / Step 2 renames fails, successfully recovered or rolled back).
-17. **Dirty worktree status** (uncommitted files outside `.ai/runs/` trigger validation failure).
+To prevent race conditions and concurrent operations on the same run:
+- **Lock File**: `.ai/runs/<run_id>.lock`
+- **Acquisition**: Created atomically using `os.open` with `os.O_CREAT | os.O_EXCL | os.O_WRONLY`.
+- **Lock Payload**: Contains YAML with `run_id`, process `pid`, UTC RFC3339 `created_at`, and a random 128-bit `nonce`.
+- **Ownership Verification**: Before releasing a lock, the runner verifies that the lock file contains the matching process `nonce`.
+- **No Guaranteed Auto-Release**: If a runner process is forcibly killed or crashes unexpectedly, the lock file will remain on disk. The runner does not perform age-based or PID-based auto-deletion of locks.
+
+### Stale Lock Manual Recovery Procedure
+
+If a command fails due to an existing stale lock file:
+1. Verify that no other runner process is currently executing for the `run_id`.
+2. Inspect the transaction marker (`.ai/runs/<run_id>.transaction.yaml`) and `.ai/runs/` directory topology.
+3. Save a diagnostic backup of the lock file and transaction marker.
+4. Manually remove the stale lock file:
+   ```bash
+   rm .ai/runs/<run_id>.lock
+   ```
+5. Execute `resume` to complete recovery:
+   ```bash
+   python3 -m vibeskills_runner resume --run-id <run_id>
+   ```
 
 ---
 
 ## Command Usage Examples
 
 ### 1. Initialize a Run
-
-To prepare a new run from an approved development contract:
 
 ```bash
 python3 -m vibeskills_runner init \
@@ -91,23 +126,12 @@ python3 -m vibeskills_runner init \
 
 ### 2. View Run Status
 
-To inspect state, revisions, budgets, and the last transitions of a run record:
-
 ```bash
 python3 -m vibeskills_runner status \
   --run-id RUN-MY-FEATURE-001
 ```
 
-To output machine-readable JSON format, append the `--json` flag:
-
-```bash
-python3 -m vibeskills_runner status \
-  --run-id RUN-MY-FEATURE-001 --json
-```
-
 ### 3. Resume a Run
-
-To verify consistency of the event journal and contract hashes before continuing:
 
 ```bash
 python3 -m vibeskills_runner resume \
@@ -116,12 +140,8 @@ python3 -m vibeskills_runner resume \
 
 ### 4. Verify a Run Record
 
-To run the repository's strict validators to verify a record matches the contract details:
-
 ```bash
 python3 -m vibeskills_runner verify \
   --run-id RUN-MY-FEATURE-001 \
   --contract .ai/specs/my-slug/development-contract.yaml
 ```
-
-*(Note: Every command accepts an optional `--repository` flag to override the default repository path which defaults to the current working directory.)*

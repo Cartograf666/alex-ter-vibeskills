@@ -114,3 +114,26 @@ class TestRunnerPersistence(unittest.TestCase):
             resolve_safe_path(base, "../escaping.txt")
         with self.assertRaises(ValidationError):
             resolve_safe_path(base, "/etc/passwd")
+
+    def test_validate_rfc3339_strict(self) -> None:
+        from vibeskills_runner.persistence import validate_rfc3339
+
+        # Valid cases
+        self.assertTrue(validate_rfc3339("2026-07-20T12:00:00Z"))
+        self.assertTrue(validate_rfc3339("2026-07-20T12:00:00.123Z"))
+        self.assertTrue(validate_rfc3339("2026-07-20T12:00:00+03:00"))
+        self.assertTrue(validate_rfc3339("2026-07-20T12:00:00-05:30"))
+
+        # Invalid cases (must raise PersistenceError)
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339("2026-02-31T12:00:00Z")  # invalid date (calendar check)
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339("2026-07-20T25:00:00Z")  # invalid hour
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339("2026-07-20 12:00:00Z")  # space separator
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339("2026-07-20")  # date-only
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339("2026-07-20T12:00:00")  # naive datetime
+        with self.assertRaises(PersistenceError):
+            validate_rfc3339(12345)  # non-string

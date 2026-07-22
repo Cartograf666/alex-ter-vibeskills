@@ -13,6 +13,11 @@ from .errors import PersistenceError, ValidationError
 
 RUN_ID_PATTERN = re.compile(r"^RUN-[A-Z0-9][A-Z0-9._-]*$")
 
+# Strictly compliant RFC3339 timezone mandatory pattern: YYYY-MM-DDTHH:MM:SS[.fraction](Z|+HH:MM|-HH:MM)
+RFC3339_REGEX = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:(Z)|([+-])(\d{2}):(\d{2}))$"
+)
+
 
 def validate_run_id(run_id: str) -> None:
     """Validate that the run ID matches the strict canonical pattern."""
@@ -23,27 +28,70 @@ def validate_run_id(run_id: str) -> None:
 
 
 def verify_runs_path_confinement(resolved_path: Path, repository: Path) -> None:
-    """Ensure that the resolved path lies strictly inside <repository>/.ai/runs/."""
-    runs_dir = (repository / ".ai/runs").resolve()
+    """Ensure that the resolved path lies strictly inside <repository>/.ai/runs/ and no symlinks exist."""
+    ai_dir = repository / ".ai"
+    runs_dir = ai_dir / "runs"
+    if ai_dir.is_symlink() or os.path.islink(str(ai_dir)):
+        raise ValidationError(f"Security breach: '{ai_dir}' is a symbolic link.")
+    if runs_dir.is_symlink() or os.path.islink(str(runs_dir)):
+        raise ValidationError(f"Security breach: '{runs_dir}' is a symbolic link.")
+
+    runs_dir_resolved = runs_dir.resolve()
     resolved_abs = resolved_path.resolve()
     try:
-        resolved_abs.relative_to(runs_dir)
+        resolved_abs.relative_to(runs_dir_resolved)
     except ValueError as exc:
         raise ValidationError(
-            f"Access denied: Path '{resolved_path}' is not within '{runs_dir}'"
+            f"Access denied: Path '{resolved_path}' is not within '{runs_dir_resolved}'"
         ) from exc
 
 
-def validate_rfc3339(timestamp: str) -> bool:
-    """Validate if the string is a valid RFC3339 timestamp."""
+def validate_rfc3339(timestamp: Any) -> bool:
+    """Validate if the string is a strictly compliant RFC3339 timestamp with mandatory timezone and calendar validation."""
     if not isinstance(timestamp, str):
-        return False
+        raise PersistenceError("Timestamp must be a string")
+
+    match = RFC3339_REGEX.match(timestamp)
+    if not match:
+        raise PersistenceError(
+            f"Timestamp '{timestamp}' does not match strict RFC3339 format."
+        )
+
+    year = int(match.group(1))
+    month = int(match.group(2))
+    day = int(match.group(3))
+    hour = int(match.group(4))
+    minute = int(match.group(5))
+    second = int(match.group(6))
+
+    if not (1 <= month <= 12):
+        raise PersistenceError(f"Invalid month in timestamp: {month}")
+
+    try:
+        # Check calendar date validity (rejects Feb 31, etc.)
+        dt.date(year, month, day)
+    except ValueError as e:
+        raise PersistenceError(f"Invalid calendar date in timestamp: {e}") from e
+
+    if hour >= 24 or minute >= 60 or second >= 60:
+        raise PersistenceError(
+            f"Time value out of range in timestamp: {hour:02d}:{minute:02d}:{second:02d}"
+        )
+
+    if match.group(8) != 'Z':
+        tz_hours = int(match.group(10))
+        tz_minutes = int(match.group(11))
+        if tz_hours >= 24 or tz_minutes >= 60:
+            raise PersistenceError(
+                f"Timezone offset out of range: {match.group(9)}{tz_hours:02d}:{tz_minutes:02d}"
+            )
+
     try:
         t = timestamp.replace("Z", "+00:00")
         dt.datetime.fromisoformat(t)
         return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise PersistenceError(f"Invalid datetime parsing result: {exc}") from exc
 
 
 def resolve_safe_path(base_dir: Path, relative_path_str: str) -> Path:
@@ -167,10 +215,14 @@ def load_events(path: Path) -> List[Dict[str, Any]]:
             raise PersistenceError(
                 f"Missing or invalid actor in event at index {idx}"
             )
-        if timestamp is None or not isinstance(timestamp, str) or not validate_rfc3339(timestamp):
+        if timestamp is None:
             raise PersistenceError(
-                f"Missing or invalid RFC3339 timestamp in event at index {idx}: {timestamp}"
+                f"Missing timestamp in event at index {idx}"
             )
+
+        # Will raise PersistenceError if invalid RFC3339 format
+        validate_rfc3339(timestamp)
+
         if data is None or not isinstance(data, dict):
             raise PersistenceError(
                 f"Missing or invalid data payload in event at index {idx}"
@@ -204,8 +256,9 @@ def load_events(path: Path) -> List[Dict[str, Any]]:
                 raise PersistenceError(f"Invalid from_state in transition event at index {idx}")
             if not isinstance(to_state, str) or not to_state:
                 raise PersistenceError(f"Invalid to_state in transition event at index {idx}")
-            if not isinstance(at_ts, str) or not validate_rfc3339(at_ts):
-                raise PersistenceError(f"Invalid at timestamp in transition event at index {idx}: {at_ts}")
+            if at_ts is None:
+                raise PersistenceError(f"Missing at timestamp in transition event at index {idx}")
+            validate_rfc3339(at_ts)
             if not isinstance(reason, str) or not reason:
                 raise PersistenceError(f"Invalid reason in transition event at index {idx}")
 
@@ -234,7 +287,6 @@ def append_event(path: Path, event: Dict[str, Any]) -> None:
 
     # Validate structure of the new event before writing
     temp_events = existing_events + [event]
-    # We can write temp_events to a temp file and load it using load_events to structurally validate it
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_file = Path(tmpdir) / "test_events.jsonl"
         with tmp_file.open("w", encoding="utf-8") as f:

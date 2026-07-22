@@ -1,123 +1,315 @@
-import importlib.machinery
-import importlib.util
 import os
+import re
+import stat
 import subprocess
 import sys
+import tempfile
+import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
+
+import yaml
 
 from .errors import ValidationError
 
-UNTRUSTED_KEYS = [
-    "validate_contract", "contract_lib", "validate_run_record",
-    "architecture_lib", "validate_architecture", "design_system_lib",
-    "validate_design_system", "finding_fingerprint"
-]
+DEFAULT_MAX_STREAM_BYTES = 1024 * 1024  # 1 MiB stream limit
+SHA256_REGEX = re.compile(r"^[0-9a-f]{64}$")
 
 
-def load_trusted_module(module_name: str, file_path: Path) -> Any:
-    """Dynamically load a python module by absolute path, avoiding sys.modules caching and verifying __file__."""
-    abs_path = file_path.resolve()
-    if not abs_path.is_file():
-        raise ValidationError(f"Trusted module file not found: {abs_path}")
+def get_site_packages_dir() -> str:
+    """Resolve system site-packages directory containing jsonschema and other dependencies."""
+    try:
+        import jsonschema
 
-    unique_name = f"trusted_bridge_{module_name}_{abs_path.stat().st_mtime_ns}"
+        return str(Path(jsonschema.__file__).resolve().parent.parent)
+    except ImportError:
+        pass
+    for p in sys.path:
+        if "site-packages" in p:
+            return p
+    return ""
 
-    loader = importlib.machinery.SourceFileLoader(unique_name, str(abs_path))
-    spec = importlib.util.spec_from_loader(unique_name, loader)
-    if spec is None or spec.loader is None:
-        raise ValidationError(f"Failed to create spec for module load: {abs_path}")
 
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[unique_name] = module
+def get_isolated_env(allowed_keys: Set[str]) -> Dict[str, str]:
+    """Build a sanitized environment based on a strict allowlist."""
+    env = {}
+    base_allow = {
+        "PATH",
+        # locales
+        "LANG",
+        "LC_ALL",
+        "LC_COLLATE",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NUMERIC",
+        "LC_TIME",
+        # temp directories
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        # Windows systemroot
+        "SYSTEMROOT",
+        "COMSPEC",
+    }
+    for k, v in os.environ.items():
+        if k in base_allow or k in allowed_keys:
+            env[k] = v
+
+    # Add Python isolation variables
+    env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONSAFEPATH"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    # Set PYTHONPATH strictly to site-packages directory to allow loading jsonschema and yaml
+    site_pkg = get_site_packages_dir()
+    if site_pkg:
+        env["PYTHONPATH"] = site_pkg
+
+    return env
+
+
+def check_trusted_file(file_path: Path, trusted_root: Path) -> None:
+    """Ensure trusted file exists, is not a symlink, is a regular file, and resides within trusted_root."""
+    abs_root = trusted_root.resolve()
+
+    # Check symlink via lstat directly on path before resolve
+    if file_path.is_symlink() or os.path.islink(str(file_path)):
+        raise ValidationError(f"Security error: File '{file_path}' is a symbolic link.")
 
     try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        if unique_name in sys.modules:
-            del sys.modules[unique_name]
-        raise ValidationError(f"Failed to execute trusted module '{abs_path}': {exc}") from exc
+        st = os.lstat(str(file_path))
+    except OSError as e:
+        raise ValidationError(f"Trusted file not found or inaccessible: {file_path}") from e
 
-    loaded_file = getattr(module, "__file__", None)
-    if loaded_file is None or Path(loaded_file).resolve() != abs_path:
+    if not stat.S_ISREG(st.st_mode):
+        raise ValidationError(f"Security error: File '{file_path}' is not a regular file.")
+
+    abs_file = file_path.resolve()
+    try:
+        abs_file.relative_to(abs_root)
+    except ValueError as exc:
         raise ValidationError(
-            f"Security Error: Loaded module __file__ '{loaded_file}' does not match expected '{abs_path}'"
+            f"Security error: File '{abs_file}' escapes trusted root '{abs_root}'"
+        ) from exc
+
+
+def check_trusted_script(script_path: Path, trusted_root: Path) -> None:
+    """Ensure script is a regular file, not a symlink, and resides within TRUSTED_ROOT."""
+    check_trusted_file(script_path, trusted_root)
+
+
+class IsolatedProcessResult:
+    """Holds stdout, stderr, and exit code from isolated subprocess execution."""
+
+    def __init__(self, returncode: int, stdout: str, stderr: str):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def run_isolated_python(
+    command: List[str],
+    *,
+    cwd: Path,
+    env: Dict[str, str],
+    timeout_seconds: float = 10.0,
+    max_stdout_bytes: int = DEFAULT_MAX_STREAM_BYTES,
+    max_stderr_bytes: int = DEFAULT_MAX_STREAM_BYTES,
+) -> IsolatedProcessResult:
+    """Execute Python subprocess with bounded execution time, pipe draining, and stream limits."""
+    if not command or command[0] != sys.executable:
+        raise ValidationError("Isolated subprocess must run using sys.executable")
+
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+        )
+    except Exception as exc:
+        raise ValidationError(f"Failed to launch isolated subprocess: {exc}") from exc
+
+    stdout_chunks: List[bytes] = []
+    stderr_chunks: List[bytes] = []
+    overflow_occurred = threading.Event()
+    overflow_stream = [""]
+
+    def read_stream(stream, chunks: List[bytes], max_bytes: int, stream_name: str):
+        bytes_read = 0
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                if bytes_read > max_bytes:
+                    overflow_stream[0] = stream_name
+                    overflow_occurred.set()
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    break
+                chunks.append(chunk)
+        except Exception:
+            pass
+
+    t_out = threading.Thread(
+        target=read_stream,
+        args=(proc.stdout, stdout_chunks, max_stdout_bytes, "stdout"),
+        daemon=True,
+    )
+    t_err = threading.Thread(
+        target=read_stream,
+        args=(proc.stderr, stderr_chunks, max_stderr_bytes, "stderr"),
+        daemon=True,
+    )
+    t_out.start()
+    t_err.start()
+
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        proc.wait()
+
+    t_out.join(timeout=1.0)
+    t_err.join(timeout=1.0)
+
+    if proc.stdout:
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
+    if proc.stderr:
+        try:
+            proc.stderr.close()
+        except OSError:
+            pass
+
+    if timed_out:
+        raise ValidationError(f"Subprocess execution timed out after {timeout_seconds} seconds")
+
+    if overflow_occurred.is_set():
+        raise ValidationError(
+            f"Subprocess {overflow_stream[0]} output overflow (exceeded stream byte limit)"
         )
 
-    return module
+    stdout_str = b"".join(stdout_chunks).decode("utf-8", errors="replace")
+    stderr_str = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+
+    return IsolatedProcessResult(proc.returncode, stdout_str, stderr_str)
 
 
-def get_sanitized_sys_path(sys_path_list: List[str], trusted_scripts_dir: Path, repository: Path) -> List[str]:
-    """Sanitize original sys.path list to exclude any target repository paths, while retaining standard libraries."""
-    sanitized = [str(trusted_scripts_dir)]
-    repo_resolved = repository.resolve()
-    for p in sys_path_list:
-        if not p:
-            continue
-        try:
-            p_path = Path(p).resolve()
-        except Exception:
-            continue
-        # Exclude current directory, repo root, and anything inside the repo
-        if p_path == Path(".").resolve() or p_path == repo_resolved or repo_resolved in p_path.parents:
-            continue
-        if p_path == trusted_scripts_dir.resolve():
-            continue
-        sanitized.append(p)
-    return sanitized
+def run_validate_semantics(
+    contract_data: Dict[str, Any],
+    repository: Path,
+    trusted_scripts_dir: Path,
+    trusted_schemas_dir: Path,
+) -> List[str]:
+    """Execute contract semantics validation within an isolated subprocess."""
+    trusted_root = trusted_scripts_dir.parent
+    validator_script = trusted_scripts_dir / "validate_contract.py"
+    check_trusted_script(validator_script, trusted_root)
 
+    schema_path = trusted_schemas_dir / "development-contract.schema.json"
+    check_trusted_file(schema_path, trusted_root)
 
-def run_validate_semantics(contract: Dict[str, Any], repository: Path, trusted_scripts_dir: Path) -> List[str]:
-    """Execute contract semantics validation within a strict sys.path and sys.modules sandbox."""
-    original_path = sys.path.copy()
-    saved_modules = {}
-
-    # Calculate sanitized path before clearing sys.path
-    sanitized = get_sanitized_sys_path(original_path, trusted_scripts_dir, repository)
-
-    # Isolate and sanitize sys.path
-    sys.path.clear()
-    sys.path.extend(sanitized)
-
-    # Temporarily remove untrusted name collisions
-    for key in UNTRUSTED_KEYS:
-        if key in sys.modules:
-            saved_modules[key] = sys.modules.pop(key)
+    with tempfile.NamedTemporaryFile(
+        suffix=".yaml", mode="w", encoding="utf-8", delete=False
+    ) as f:
+        yaml.safe_dump(contract_data, f, allow_unicode=True)
+        temp_path = Path(f.name)
 
     try:
-        val_mod = load_trusted_module("validate_contract", trusted_scripts_dir / "validate_contract.py")
-        return val_mod.validate_semantics(contract, repository)
+        allowed_keys = {"VIBESKILLS_APPROVAL_HMAC_KEY", "VIBESKILLS_APPROVAL_HMAC_KEYS"}
+        env = get_isolated_env(allowed_keys)
+
+        cmd = [
+            sys.executable,
+            str(validator_script),
+            str(temp_path),
+            "--schema",
+            str(schema_path),
+            "--repository",
+            str(repository),
+        ]
+
+        res = run_isolated_python(cmd, cwd=trusted_root, env=env, timeout_seconds=10.0)
+
+        errors = []
+        output = res.stderr or ""
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("ERROR:"):
+                errors.append(line[6:].strip())
+            elif line:
+                errors.append(line)
+
+        if not errors and res.returncode != 0:
+            errors.append(res.stderr.strip() or f"Subprocess returned {res.returncode}")
+
+        return errors
+
     finally:
-        sys.path.clear()
-        sys.path.extend(original_path)
-        for key, mod in saved_modules.items():
-            sys.modules[key] = mod
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
-def run_contract_payload_sha256(contract: Dict[str, Any], trusted_scripts_dir: Path) -> str:
-    """Execute contract payload hashing within a strict sys.path and sys.modules sandbox."""
-    original_path = sys.path.copy()
-    saved_modules = {}
+def run_contract_payload_sha256(
+    contract_data: Dict[str, Any], trusted_scripts_dir: Path
+) -> str:
+    """Execute contract payload hashing via an isolated helper worker."""
+    trusted_root = trusted_scripts_dir.parent
+    worker_script = Path(__file__).resolve().parent / "contract_hash_worker.py"
+    check_trusted_script(worker_script, trusted_root)
 
-    # Calculate sanitized path before clearing sys.path
-    sanitized = get_sanitized_sys_path(original_path, trusted_scripts_dir, trusted_scripts_dir.parent)
-
-    # Isolate and sanitize sys.path
-    sys.path.clear()
-    sys.path.extend(sanitized)
-
-    for key in UNTRUSTED_KEYS:
-        if key in sys.modules:
-            saved_modules[key] = sys.modules.pop(key)
+    with tempfile.NamedTemporaryFile(
+        suffix=".yaml", mode="w", encoding="utf-8", delete=False
+    ) as f:
+        yaml.safe_dump(contract_data, f, allow_unicode=True)
+        temp_path = Path(f.name)
 
     try:
-        lib_mod = load_trusted_module("contract_lib", trusted_scripts_dir / "contract_lib.py")
-        return lib_mod.contract_payload_sha256(contract)
+        # Hashing worker does not receive any HMAC secrets
+        env = get_isolated_env(set())
+
+        cmd = [
+            sys.executable,
+            str(worker_script),
+            str(temp_path),
+            str(trusted_scripts_dir),
+        ]
+
+        res = run_isolated_python(cmd, cwd=trusted_root, env=env, timeout_seconds=10.0)
+
+        if res.returncode != 0:
+            raise ValidationError(f"Contract hashing worker failed: {res.stderr.strip()}")
+
+        out = res.stdout.strip()
+        if not SHA256_REGEX.match(out):
+            raise ValidationError(f"Contract hashing worker output invalid: '{out}'")
+
+        return out
+
     finally:
-        sys.path.clear()
-        sys.path.extend(original_path)
-        for key, mod in saved_modules.items():
-            sys.modules[key] = mod
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 def run_validator_subprocess(
@@ -126,16 +318,24 @@ def run_validator_subprocess(
     repo_root: Path,
     trusted_root: Path,
     trusted_scripts_dir: Path,
-    trusted_schemas_dir: Path
-) -> subprocess.CompletedProcess:
-    """Execute the validate_run_record subprocess with isolated environment and secure working directory."""
-    env = os.environ.copy()
-    # Clear PYTHONPATH or restrict to trusted scripts directory
-    env["PYTHONPATH"] = str(trusted_scripts_dir)
-
+    trusted_schemas_dir: Path,
+) -> IsolatedProcessResult:
+    """Execute the validate_run_record subprocess with an isolated environment."""
     validator_script = trusted_scripts_dir / "validate_run_record.py"
-    if not validator_script.is_file():
-        raise ValidationError(f"Trusted validation script not found: {validator_script}")
+    check_trusted_script(validator_script, trusted_root)
+
+    run_record_schema = trusted_schemas_dir / "run-record.schema.json"
+    contract_schema = trusted_schemas_dir / "development-contract.schema.json"
+    check_trusted_file(run_record_schema, trusted_root)
+    check_trusted_file(contract_schema, trusted_root)
+
+    allowed_keys = {
+        "VIBESKILLS_APPROVAL_HMAC_KEY",
+        "VIBESKILLS_APPROVAL_HMAC_KEYS",
+        "VIBESKILLS_RUN_HMAC_KEY",
+        "VIBESKILLS_RUN_HMAC_KEYS",
+    }
+    env = get_isolated_env(allowed_keys)
 
     cmd = [
         sys.executable,
@@ -146,17 +346,9 @@ def run_validator_subprocess(
         "--repository",
         str(repo_root),
         "--schema",
-        str(trusted_schemas_dir / "run-record.schema.json"),
+        str(run_record_schema),
         "--contract-schema",
-        str(trusted_schemas_dir / "development-contract.schema.json"),
+        str(contract_schema),
     ]
 
-    return subprocess.run(
-        cmd,
-        cwd=str(trusted_root),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False
-    )
+    return run_isolated_python(cmd, cwd=trusted_root, env=env, timeout_seconds=10.0)
