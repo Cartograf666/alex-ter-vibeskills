@@ -37,7 +37,11 @@ class SkillContractTests(unittest.TestCase):
                 self.assertIn("## Summarize what you did", text)
                 self.assertIn("where each created or updated file now lives", text)
                 self.assertIn("never claim a file was written that was not", text)
-                self.assertIn("This skill normally writes:", text)
+                self.assertTrue(
+                    "This skill normally writes:" in text
+                    or "This skill writes no artifacts of its own." in text,
+                    "a skill must list the artifacts it writes, or state that it writes none",
+                )
                 self.assertIn("`.ai/", text)
 
 

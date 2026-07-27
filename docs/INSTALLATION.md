@@ -1,6 +1,6 @@
 # Installation
 
-Verified Development Skills follows the open Agent Skills directory format. Install all five skills so preparation, architecture, design, execution, and verification can hand work to one another without losing their contracts.
+Verified Development Skills follows the open Agent Skills directory format. Install all six skills so routing, preparation, architecture, design, execution, and verification can hand work to one another without losing their contracts.
 
 ## Requirements
 
@@ -150,7 +150,7 @@ python3 scripts/install_skills.py --target codex --scope user --force
 
 Version `0.3.0-alpha.1` uses development-contract schema 3. Do not silently upgrade or reuse an earlier approval. Run `prepare-development-cycle` again, bind any persisted Decision Brief, resolve interaction and role-routing fields, review the resulting contract, and approve it as a new version.
 
-To uninstall, delete only the five installed directories from the corresponding discovery directory. The installer never edits agent settings, credentials, or project source files outside the chosen skills directory.
+To uninstall, delete only the six installed directories from the corresponding discovery directory. The installer never edits agent settings, credentials, or project source files outside the chosen skills directory.
 
 ## Troubleshooting
 
