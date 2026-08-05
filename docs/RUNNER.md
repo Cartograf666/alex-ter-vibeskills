@@ -40,6 +40,7 @@ Subprocesses do not inherit the host environment. Each tool receives a minimal a
 - **Run-Record Validator**: Receives only `VIBESKILLS_APPROVAL_HMAC_KEY(S)` and `VIBESKILLS_RUN_HMAC_KEY(S)`.
 - **Python Flags**: All subprocesses enforce `PYTHONNOUSERSITE=1`, `PYTHONSAFEPATH=1`, and `PYTHONDONTWRITEBYTECODE=1`. Cloud credentials, provider API keys, and arbitrary environment variables are never passed.
 - **Runtime Dependencies**: The isolated dependency root is selected only from the active Python runtime's `site` locations after verifying the required packages are present; it never uses `sys.modules`, `find_spec`, or the target repository's `sys.path`.
+- **Trusted Import Directories**: Because `PYTHONSAFEPATH=1` removes the script's own directory from `sys.path` on Python 3.11+, validator scripts that import siblings receive `TRUSTED_SCRIPTS_DIR` explicitly on `PYTHONPATH`. The dependency root is listed first so a trusted script directory cannot shadow `jsonschema` or `yaml`, and only directories inside `TRUSTED_ROOT` are ever granted — the target repository is never added.
 
 ---
 

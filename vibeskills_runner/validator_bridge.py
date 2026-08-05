@@ -7,7 +7,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Sequence, Set
 
 import yaml
 
@@ -31,8 +31,16 @@ def get_site_packages_dir() -> str:
     )
 
 
-def get_isolated_env(allowed_keys: Set[str]) -> Dict[str, str]:
-    """Build a sanitized environment based on a strict allowlist."""
+def get_isolated_env(
+    allowed_keys: Set[str], trusted_import_dirs: Sequence[Path] = ()
+) -> Dict[str, str]:
+    """Build a sanitized environment based on a strict allowlist.
+
+    ``trusted_import_dirs`` are appended to PYTHONPATH so trusted scripts can
+    import their siblings. PYTHONSAFEPATH strips the script's own directory
+    from sys.path on Python 3.11+, so a validator that relies on sibling
+    imports needs its directory granted explicitly rather than implicitly.
+    """
     env = {}
     base_allow = {
         "PATH",
@@ -62,10 +70,13 @@ def get_isolated_env(allowed_keys: Set[str]) -> Dict[str, str]:
     env["PYTHONSAFEPATH"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-    # Set PYTHONPATH strictly to site-packages directory to allow loading jsonschema and yaml
-    site_pkg = get_site_packages_dir()
-    if site_pkg:
-        env["PYTHONPATH"] = site_pkg
+    # Set PYTHONPATH strictly to site-packages plus explicitly trusted directories.
+    # site-packages stays first so a trusted script directory cannot shadow
+    # jsonschema or yaml.
+    path_entries = [get_site_packages_dir()]
+    for directory in trusted_import_dirs:
+        path_entries.append(str(Path(directory).resolve()))
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
 
     return env
 
@@ -233,7 +244,7 @@ def run_validate_semantics(
 
     try:
         allowed_keys = {"VIBESKILLS_APPROVAL_HMAC_KEY", "VIBESKILLS_APPROVAL_HMAC_KEYS"}
-        env = get_isolated_env(allowed_keys)
+        env = get_isolated_env(allowed_keys, trusted_import_dirs=(trusted_scripts_dir,))
 
         cmd = [
             sys.executable,
@@ -339,7 +350,7 @@ def run_validator_subprocess(
         "VIBESKILLS_RUN_HMAC_KEY",
         "VIBESKILLS_RUN_HMAC_KEYS",
     }
-    env = get_isolated_env(allowed_keys)
+    env = get_isolated_env(allowed_keys, trusted_import_dirs=(trusted_scripts_dir,))
 
     cmd = [
         sys.executable,
