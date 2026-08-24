@@ -11,7 +11,7 @@ Turn a vague product idea into an approved development contract, bounded impleme
 [![Agent Skills](https://img.shields.io/badge/standard-Agent%20Skills-2563eb)](https://agentskills.io/specification)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 
-[Quick start](#quick-start) · [Which skill when](#which-skill-when) · [The six skills](#the-six-skills) · [Installation](#installation) · [Security](#security-model) · [Vibeskills Runner](docs/RUNNER.md)
+[Quick start](#quick-start) · [Which skill when](#which-skill-when) · [The six skills](#the-six-skills) · [Installation](#installation) · [Security](#security-model) · [Vibeskills Runner](#vibeskills-runner-alpha-kernel)
 
 </div>
 
@@ -318,6 +318,42 @@ The skills create and consume a predictable `.ai/` control plane:
 
 `DESIGN-BRIEF.md` is required only for applicable UI work. `TECHNICAL-BRIEF.md` may be omitted for a lean task only with a recorded reason.
 
+## Vibeskills Runner (alpha kernel)
+
+> [!WARNING]
+> `vibeskills-runner` implements the storage and state kernel only. It does not execute models, write production code, provide an OS sandbox, or run automated quality gates.
+
+Where the skills define what is allowed, the runner records what actually happened. It converts an approved development contract into a durable run record that survives a crash mid-write and can be recovered deterministically.
+
+The kernel is responsible for:
+
+- validating development contracts through trusted, isolated subprocesses;
+- initializing schema-compliant run records via atomic multi-stage promotion;
+- appending to a monotonic event journal;
+- enforcing the governance state machine on every transition;
+- reconciling transaction markers, filesystem topology, and SHA-256 hashes during recovery.
+
+```bash
+python3 -m vibeskills_runner init \
+  --contract .ai/specs/<slug>/development-contract.yaml \
+  --run-id RUN-MY-FEATURE-001 \
+  --manager-provider anthropic \
+  --manager-model opus \
+  --manager-model-version <explicit-model-id> \
+  --manager-context-id manager-context-001
+
+python3 -m vibeskills_runner status --run-id RUN-MY-FEATURE-001
+python3 -m vibeskills_runner resume --run-id RUN-MY-FEATURE-001
+
+python3 -m vibeskills_runner verify \
+  --run-id RUN-MY-FEATURE-001 \
+  --contract .ai/specs/<slug>/development-contract.yaml
+```
+
+The target repository is untrusted data. The runner never imports from it, executes validators only as bounded subprocesses from the trusted toolkit root under an allowlisted environment, rejects symlinked paths inside `.ai/runs/`, and fails closed when staging files exist without a valid transaction marker.
+
+See [Vibeskills Runner](docs/RUNNER.md) for the transaction phase machine, the marker and topology recovery matrix, the lock protocol, and the stale-lock recovery procedure.
+
 ## Automation modes
 
 | Mode | Behavior |
@@ -348,15 +384,16 @@ Read [Security Policy](SECURITY.md) before autonomous command execution or exter
 ## Repository structure
 
 ```text
-skills/       portable skill sources
-schemas/      canonical JSON Schemas
-scripts/      validators, approval tools, installer, and package builder
-tests/        positive and adversarial regression tests
-evals/        workflow-level adversarial cases
-examples/     complete example artifacts and starter prompts
-templates/    canonical fill-in templates synchronized into standalone skills
-packages/     deterministic .skill archives for the OpenAI Skills UI
-docs/         installation and repository hardening guides
+skills/             portable skill sources
+schemas/            canonical JSON Schemas
+scripts/            validators, approval tools, installer, and package builder
+vibeskills_runner/  alpha runner kernel: contracts, run records, recovery
+tests/              positive and adversarial regression tests
+evals/              workflow-level adversarial cases
+examples/           complete example artifacts and starter prompts
+templates/          canonical fill-in templates synchronized into standalone skills
+packages/           deterministic .skill archives for the OpenAI Skills UI
+docs/               installation, runner, and repository hardening guides
 ```
 
 ## Validate the repository
@@ -384,8 +421,9 @@ See [Contributing](CONTRIBUTING.md) before opening a pull request.
 
 Current release: **0.3.0-alpha.1**.
 
-The repository provides the full governance and validation layer. It does not yet provide:
+The repository provides the full governance and validation layer, plus the alpha `vibeskills-runner` kernel for contract validation, run-record storage, state transitions, and crash recovery. It does not yet provide:
 
+- model execution, code writing, or automated quality gates inside the runner;
 - a hosted cross-provider orchestrator;
 - provider accounts, credentials, or billing;
 - OS/container sandbox implementation;
