@@ -140,13 +140,16 @@ Claude Code also exposes skills as `/skill-name`. Codex supports `$skill-name` m
 
 ## Update or uninstall
 
-To update, pull the reviewed repository version and reinstall intentionally:
+To update, pull the reviewed repository version, check what is installed, and reinstall intentionally:
 
 ```bash
 git pull --ff-only
 python3 scripts/package_skills.py --check
+python3 scripts/install_skills.py --check --target codex --scope user
 python3 scripts/install_skills.py --target codex --scope user --force
 ```
+
+`--check` is read-only and reports each skill as `current`, `outdated`, `modified`, `missing`, or `unmanaged`. It exits 0 only when all skills are current; otherwise it exits 1. Markers record the toolkit version, source revision, UTC installation time, and file hashes. Legacy markers and installs from a dirty checkout are `outdated`. Do not combine `--check` with `--force`.
 
 Version `0.3.0-alpha.1` uses development-contract schema 3. Do not silently upgrade or reuse an earlier approval. Run `prepare-development-cycle` again, bind any persisted Decision Brief, resolve interaction and role-routing fields, review the resulting contract, and approve it as a new version.
 
@@ -167,7 +170,7 @@ Install the hash-locked `requirements.txt` bundled with that installed skill. Do
 
 ### An existing installation blocks the installer
 
-This is intentional. Compare the installed directory with the reviewed source. Use `--force` only when replacement is expected.
+This is intentional. Run `python3 scripts/install_skills.py --check --target codex --scope user` (adjust the target and scope) and compare the installed directory with the reviewed source. Use `--force` only when replacement is expected.
 
 ## Official host documentation
 
