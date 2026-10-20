@@ -90,3 +90,7 @@ Keep supporting material in per-skill reference directories, such as
 [references/](skills/guide-development-pipeline/references/), and load it on demand.
 Per-skill OpenAI interface metadata lives in
 [agents/openai.yaml](skills/guide-development-pipeline/agents/openai.yaml).
+
+The Claude plugin manifest and marketplace versions must equal [VERSION](VERSION);
+[tests/test_claude_plugin.py](tests/test_claude_plugin.py) enforces this invariant.
+Root [skills/](skills/) also serves as the plugin skills directory.

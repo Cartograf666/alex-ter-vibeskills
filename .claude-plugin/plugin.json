@@ -1,0 +1,18 @@
+{
+  "name": "vibeskills",
+  "version": "0.3.0-alpha.1",
+  "description": "PRD-first, architecture-aware, design-system-aware workflows for reliable AI-assisted development.",
+  "author": {
+    "name": "Cartograf666"
+  },
+  "homepage": "https://github.com/Cartograf666/alex-ter-vibeskills",
+  "repository": "https://github.com/Cartograf666/alex-ter-vibeskills",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "development",
+    "governance",
+    "verification",
+    "subagents"
+  ]
+}
