@@ -49,6 +49,35 @@ python3 scripts/install_skills.py --target claude --scope user
 
 Claude Code discovers project skills from `.claude/skills/` and personal skills from `~/.claude/skills/`. Restart Claude Code only if a newly created top-level skills directory is not detected in the current session.
 
+## Install as a Claude Code plugin
+
+In Claude Code, add the marketplace and install the plugin:
+
+```text
+/plugin marketplace add Cartograf666/alex-ter-vibeskills
+/plugin install vibeskills@vibeskills
+```
+
+To update through Claude Code:
+
+```text
+/plugin marketplace update vibeskills
+/plugin update vibeskills@vibeskills
+```
+
+This is an alternative to `install_skills.py --target claude`; do not use both,
+because the skills would be duplicated. The plugin discovers all six skills
+from the repository's root `skills/` directory without copying them.
+Installer `--check` freshness reporting applies to the installer, not the plugin.
+
+The plugin provides `vibeskills-scout`, `vibeskills-tester`, `vibeskills-writer`,
+`vibeskills-verifier`, and `vibeskills-reviewer`; your main session is the manager.
+Tool allowlists do not enforce path limits: the tester's named test paths and
+writer's assigned worktree and allowed paths are prose contracts until enforced
+by permissions or hooks (see [Provider Adapters](../skills/run-verified-development-loop/references/provider-adapters.md#claude-code)).
+Bash access is not a filesystem sandbox, and role names alone do not establish
+reviewer independence or trusted attestation.
+
 ## Install for OpenAI Codex
 
 OpenAI uses the same Agent Skills format across Codex surfaces. Choose local discovery for Codex CLI, IDE, desktop projects, and repositories, or upload the packaged archive through the Skills UI available in ChatGPT. These are two delivery paths for the same skills.

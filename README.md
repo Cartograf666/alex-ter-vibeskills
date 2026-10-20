@@ -175,6 +175,7 @@ All skills follow the open [Agent Skills specification](https://agentskills.io/s
 | Host | Project scope | User scope | Recommended installation |
 |---|---|---|---|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `--target claude` |
+| Claude Code plugin | Plugin-managed | Plugin-managed | [Plugin installation](docs/INSTALLATION.md#install-as-a-claude-code-plugin) |
 | OpenAI Codex — local CLI, IDE, or repository | `.agents/skills/` | `~/.agents/skills/` | `--target codex` |
 | OpenAI Skills UI in ChatGPT | Upload `.skill` archives | Managed in the Skills UI | Upload from `packages/` |
 | Gemini CLI 0.26+ | `.gemini/skills/` | `~/.gemini/skills/` | `--target gemini` |

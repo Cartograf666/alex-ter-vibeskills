@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vibeskills",
+  "owner": {
+    "name": "Cartograf666"
+  },
+  "plugins": [
+    {
+      "name": "vibeskills",
+      "source": "./",
+      "version": "0.3.0-alpha.1",
+      "description": "PRD-first, architecture-aware, design-system-aware workflows for reliable AI-assisted development.",
+      "category": "development"
+    }
+  ],
+  "description": "PRD-first, architecture-aware, design-system-aware workflows for reliable AI-assisted development."
+}
