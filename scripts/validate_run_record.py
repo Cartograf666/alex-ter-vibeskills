@@ -365,6 +365,10 @@ def validate_semantics(
     contract_gates = {item["id"]: item for item in contract["quality_gates"]} if contract else {}
     for result in record["gate_results"]:
         gate_results_by_id.setdefault(result["gate_id"], []).append(result)
+        if result["status"] == "passed" and result["exit_code"] != 0:
+            errors.append(f"gate {result['gate_id']} passed status requires exit_code == 0")
+        if result["status"] == "failed" and result["exit_code"] == 0:
+            errors.append(f"gate {result['gate_id']} failed status requires exit_code != 0")
         gate = contract_gates.get(result["gate_id"])
         if gate:
             expected_command_hash = sha256_bytes(gate["command"].encode("utf-8"))
@@ -377,6 +381,9 @@ def validate_semantics(
                 content = git_file_at(repository, result["revision"], input_path)
                 if content is None or sha256_bytes(content) != recorded_hash:
                     errors.append(f"gate {result['gate_id']} resolved input differs from Git: {input_path}")
+        if result["status"] == "not-run":
+            continue
+        if gate:
             environment = result["execution_environment"]
             if gate["sandbox"] == "required" and environment["sandbox"] != "applied":
                 errors.append(f"gate {result['gate_id']} did not use required sandbox")
@@ -407,6 +414,7 @@ def validate_semantics(
         if terminal == "accepted":
             execution_payload = canonical_sha256({
                 "gate_id": result["gate_id"], "command_sha256": result["command_sha256"],
+                "status": result["status"], "failure_class": result["failure_class"],
                 "resolved_inputs": result["resolved_inputs"],
                 "revision": result["revision"], "tree_sha256": result["tree_sha256"],
                 "exit_code": result["exit_code"], "started_at": result["started_at"],
@@ -552,7 +560,7 @@ def validate_semantics(
         for gate_id, results in gate_results_by_id.items():
             current_results = [
                 result for result in results
-                if result["exit_code"] == 0
+                if result["status"] == "passed" and result["exit_code"] == 0
                 and result["revision"] == record["current_revision"]
                 and result["tree_sha256"] == record["current_tree_sha256"]
             ]

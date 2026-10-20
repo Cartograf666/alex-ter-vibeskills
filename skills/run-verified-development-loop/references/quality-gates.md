@@ -41,7 +41,7 @@ scope check
 -> independent code and architecture review
 ```
 
-Adapt the order when compilation is required before tests. Capture the exact command and exit code for every required gate.
+Adapt the order when compilation is required before tests. Capture the exact command and exit code for every executed required gate. Record gates that cannot execute using the `not-run` rules below.
 
 Use deterministic tools for deterministic questions:
 
@@ -72,13 +72,15 @@ Haiku or another low-cost model may draft and execute routine tests. Require a s
 
 For each failure:
 
-1. Classify it as product defect, test defect, environment failure, flaky test, or unrelated pre-existing failure.
+1. Record `status: failed` and classify it with `failure_class`: product defect → `product-defect`, test defect → `test-defect`, environment failure → `environment`, flaky test → `flaky`, or unrelated pre-existing failure → `pre-existing`.
 2. Preserve evidence for the classification.
 3. Repair only the causal issue within the task scope.
 4. Rerun the focused failing gate.
 5. Rerun all required gates after the focused gate passes.
 
-Never silently treat an unrun check as passing. If a check cannot run, disclose why and escalate according to the risk.
+Record an unrun gate as `status: not-run` with a non-null `failure_class` from the same five values and a non-empty `note` explaining why (maximum 500 characters). Never omit it or count it as passing. Set all execution fields to null: `exit_code`, `started_at`, `finished_at`, `log_path`, `log_sha256`, `execution_environment`, `execution_event_id`, and `execution_hmac_sha256`. Retain `gate_id`, `command_sha256`, `resolved_inputs`, `revision`, and `tree_sha256` to pin the intended verification state. Escalate according to the risk.
+
+A passing executed gate uses `status: passed`, `exit_code: 0`, and `failure_class: null`; a failed executed gate requires a non-zero exit code. Both retain non-null execution evidence (exit code, timestamps, log path/hash, and environment); their `note` may be null or a string of at most 500 characters. Execution attestation fields remain nullable, but an accepted run requires host attestations for every executed result, including failed history. A `not-run` result never carries an execution attestation. Acceptance requires exactly one current passing result per contract gate; failed and not-run history never counts. Staleness is derived from `revision` and `tree_sha256`, not a stored field.
 
 Do not use these shortcuts unless the user explicitly approves a justified exception:
 

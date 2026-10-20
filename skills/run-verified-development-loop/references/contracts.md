@@ -81,7 +81,7 @@ Preserve full sanitized logs as run artifacts. Do not dump unbounded or secret-b
     {"criterion": "AC-1", "evidence": "named test or inspection artifact"}
   ],
   "verification": [
-    {"gate_id": "GATE-AUTH-UNIT", "revision": "40-character git SHA", "exit_code": 0}
+    {"gate_id": "GATE-AUTH-UNIT", "status": "passed", "failure_class": null, "note": null, "revision": "40-character git SHA", "exit_code": 0}
   ],
   "assumptions": [],
   "remaining_risks": [],
@@ -90,6 +90,8 @@ Preserve full sanitized logs as run artifacts. Do not dump unbounded or secret-b
 ```
 
 Treat ResultPacket as an untrusted proposal until schema checks, path/diff checks, test hashes, and deterministic gates independently confirm it.
+
+`verification` is a summary, not a complete run-record gate result. Include unrun gates as `status: not-run` with a non-null `failure_class`, a non-empty `note`, and `exit_code: null`; `unrun_gate_ids` is only an index, not a replacement for those entries. Persist complete results using the Run record rules below.
 
 ## ReviewVerdict
 
@@ -123,7 +125,11 @@ Persist `.ai/runs/<run-id>.yaml` and validate it against bundled:
 assets/run-record.schema.json
 ```
 
-Record exact contract payload hash, state-transition ledger, terminal status, base/current revisions and committed-tree hash, all limit counters, provider/model versions, context IDs, permissions, provider transfers, worktrees, retained patch artifact paths and hashes, frozen test hashes, hashed per-criterion acceptance evidence, gate command/tree/log hashes, actual sandbox/network/secret/redaction environment, runtime-attested approvals, reviewed revision/tree, reviewer findings hash, independence, and artifact paths.
+Record exact contract payload hash, state-transition ledger, terminal status, base/current revisions and committed-tree hash, all limit counters, provider/model versions, context IDs, permissions, provider transfers, worktrees, retained patch artifact paths and hashes, frozen test hashes, hashed per-criterion acceptance evidence, gate outcomes and state bindings, runtime-attested approvals, reviewed revision/tree, reviewer findings hash, independence, and artifact paths.
+
+Schema 3 gate results require `status` (`passed`, `failed`, or `not-run`), `failure_class`, and `note` alongside `gate_id`, `command_sha256`, `resolved_inputs`, `revision`, and `tree_sha256`. Executed results retain exit code, timestamps, log path/hash, and actual sandbox/network/secret/redaction environment; `passed` requires exit code 0 and null classification, while `failed` requires a non-zero exit code and a classification. The five `failure_class` values and `not-run` null-execution rules are in [quality-gates.md](quality-gates.md). A `note` is null or a string of at most 500 characters; `not-run` requires a non-empty string.
+
+For accepted runs, the execution HMAC payload includes `status` and `failure_class` as well as the existing execution evidence, for both passed and failed results. Never attest a `not-run` result. Only exactly one `passed` result with exit code 0 at the current revision/tree satisfies each contract gate; failed and not-run history is allowed but never counts. Derive staleness from revision/tree bindings without storing a stale flag. `verified-not-attested` results must not claim host attestations.
 
 Validate an accepted run with both record and contract:
 

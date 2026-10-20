@@ -15,9 +15,9 @@ def create_initial_run_record(
     timestamp: str,
     reason: str
 ) -> Dict[str, Any]:
-    """Create a default run record in accordance with the run record schema version 2."""
+    """Create a default run record in accordance with the run record schema version 3."""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_id": run_id,
         "contract_id": contract_id,
         "contract_payload_sha256": contract_payload_hash,

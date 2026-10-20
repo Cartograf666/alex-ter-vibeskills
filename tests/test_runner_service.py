@@ -132,7 +132,7 @@ class TestRunnerService(unittest.TestCase):
 
         # Load run record and check fields
         record = yaml.safe_load(run_yaml.read_text(encoding="utf-8"))
-        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["schema_version"], 3)
         self.assertEqual(record["run_id"], run_id)
         self.assertEqual(record["state"], "DISCOVER")
         self.assertEqual(record["terminal_status"], "none")

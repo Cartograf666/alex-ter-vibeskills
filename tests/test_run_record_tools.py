@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import yaml
+from jsonschema import Draft202012Validator, FormatChecker
 
 from tests.test_contract_tools import base_contract
 from tests.eval_coverage import covers_adversarial
@@ -40,6 +41,51 @@ def canonical_sha256(value: object) -> str:
 def attestation_hmac(action: str, payload_hash: str, event_id: str, actor: str) -> str:
     message = "\n".join(["default", action, payload_hash, event_id, actor]).encode()
     return hmac.new(b"test-host-secret-with-at-least-32-bytes", message, hashlib.sha256).hexdigest()
+
+
+EXECUTION_FIELDS = (
+    "exit_code", "started_at", "finished_at", "log_path", "log_sha256",
+    "execution_environment", "execution_event_id", "execution_hmac_sha256",
+)
+
+
+def not_run_result(result: dict) -> dict:
+    result = copy.deepcopy(result)
+    result.update({field: None for field in EXECUTION_FIELDS})
+    result.update(status="not-run", failure_class="environment", note="Test runtime unavailable.")
+    return result
+
+
+def sign_gate_result(result: dict) -> None:
+    payload = canonical_sha256({key: result[key] for key in (
+        "gate_id", "command_sha256", "status", "failure_class", "resolved_inputs",
+        "revision", "tree_sha256", "exit_code", "started_at", "finished_at",
+        "log_sha256", "execution_environment",
+    )})
+    result["execution_hmac_sha256"] = attestation_hmac(
+        f"gate-result:{result['gate_id']}", payload, result["execution_event_id"], "trusted-executor"
+    )
+
+
+def sign_run_record(record: dict) -> None:
+    payload = copy.deepcopy(record)
+    payload["run_attestation"] = {
+        "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
+    }
+    payload_hash = canonical_sha256(payload)
+    attestation = record["run_attestation"]
+    attestation["payload_sha256"] = payload_hash
+    attestation["hmac_sha256"] = attestation_hmac(
+        "accepted-run", payload_hash, attestation["event_id"], attestation["actor"]
+    )
+
+
+def gate_schema_errors(result: dict) -> list:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(
+        {"$defs": schema["$defs"], "$ref": "#/$defs/gateResult"}, format_checker=FormatChecker()
+    )
+    return list(validator.iter_errors(result))
 
 
 class RunRecordToolsTests(unittest.TestCase):
@@ -134,6 +180,7 @@ class RunRecordToolsTests(unittest.TestCase):
         }
         record["gate_results"] = [{
             "gate_id": "GATE-TEST",
+            "status": "passed", "failure_class": None, "note": None,
             "command_sha256": hashlib.sha256(b"python3 test_runner.py").hexdigest(),
             "resolved_inputs": [{"path": "test_runner.py", "sha256": hashlib.sha256((self.repo / "test_runner.py").read_bytes()).hexdigest()}],
             "revision": head, "tree_sha256": tree, "exit_code": 0,
@@ -142,18 +189,7 @@ class RunRecordToolsTests(unittest.TestCase):
             "execution_environment": {"sandbox": "applied", "network": "deny", "secrets": "none", "log_redaction": "not-required"},
             "execution_event_id": "gate-execution-1", "execution_hmac_sha256": "0" * 64,
         }]
-        gate_result = record["gate_results"][0]
-        execution_payload = canonical_sha256({
-            "gate_id": gate_result["gate_id"], "command_sha256": gate_result["command_sha256"],
-            "resolved_inputs": gate_result["resolved_inputs"],
-            "revision": gate_result["revision"], "tree_sha256": gate_result["tree_sha256"],
-            "exit_code": gate_result["exit_code"], "started_at": gate_result["started_at"],
-            "finished_at": gate_result["finished_at"], "log_sha256": gate_result["log_sha256"],
-            "execution_environment": gate_result["execution_environment"],
-        })
-        gate_result["execution_hmac_sha256"] = attestation_hmac(
-            "gate-result:GATE-TEST", execution_payload, "gate-execution-1", "trusted-executor"
-        )
+        sign_gate_result(record["gate_results"][0])
         record["acceptance_results"] = [{
             "criterion_id": "AC-1", "status": "passed", "evidence_paths": [{
                 "path": ".ai/runs/evidence.txt",
@@ -189,15 +225,7 @@ class RunRecordToolsTests(unittest.TestCase):
             "payload_sha256": None, "hmac_sha256": None,
         }
         record["attestation_key_id"] = "default"
-        run_payload = copy.deepcopy(record)
-        run_payload["run_attestation"] = {
-            "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
-        }
-        run_payload_hash = canonical_sha256(run_payload)
-        record["run_attestation"]["payload_sha256"] = run_payload_hash
-        record["run_attestation"]["hmac_sha256"] = attestation_hmac(
-            "accepted-run", run_payload_hash, "accepted-run-1", "trusted-orchestrator"
-        )
+        sign_run_record(record)
         self.record_path = artifacts / "run.yaml"
         self.write_record(record)
         return record, contract_path
@@ -352,12 +380,230 @@ class RunRecordToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Valid run record", result.stdout)
 
+    def test_schema_2_run_record_is_rejected(self) -> None:
+        record = yaml.safe_load(self.record_path.read_text(encoding="utf-8"))
+        record["schema_version"] = 2
+        self.write_record(record)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("schema_version", result.stderr)
+
+    @covers_adversarial("EVAL-GATE-STATUS-FORGERY")
+    def test_gate_status_must_match_exit_code(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run()
+        for status, exit_code, failure_class in (
+            ("passed", 1, None), ("failed", 0, "product-defect"),
+        ):
+            with self.subTest(status=status):
+                record = copy.deepcopy(baseline)
+                gate = record["gate_results"][0]
+                gate.update(status=status, exit_code=exit_code, failure_class=failure_class)
+                self.assertEqual(gate_schema_errors(gate), [])
+                sign_gate_result(gate)
+                sign_run_record(record)
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"gate GATE-TEST {status} status requires exit_code", result.stderr)
+                self.assertNotIn("host attestation HMAC is invalid", result.stderr)
+
+    def test_gate_failure_class_schema_rules(self) -> None:
+        record, _ = self.prepare_accepted_run()
+        original = record["gate_results"][0]
+        classes = ("product-defect", "test-defect", "environment", "flaky", "pre-existing")
+        for status in ("passed", "failed", "not-run"):
+            for failure_class in (None,) + classes + ("unknown",):
+                with self.subTest(status=status, failure_class=failure_class):
+                    gate = not_run_result(original) if status == "not-run" else copy.deepcopy(original)
+                    gate.update(status=status, failure_class=failure_class)
+                    valid = failure_class is None if status == "passed" else failure_class in classes
+                    self.assertEqual(not gate_schema_errors(gate), valid)
+
+    def test_gate_outcome_and_state_pins_are_required(self) -> None:
+        record, _ = self.prepare_accepted_run()
+        for original in (record["gate_results"][0], not_run_result(record["gate_results"][0])):
+            for field in ("status", "failure_class", "note", "gate_id", "command_sha256",
+                          "resolved_inputs", "revision", "tree_sha256"):
+                with self.subTest(status=original["status"], field=field):
+                    gate = copy.deepcopy(original)
+                    del gate[field]
+                    self.assertTrue(gate_schema_errors(gate))
+                    if field not in ("failure_class", "note"):
+                        gate[field] = None
+                        self.assertTrue(gate_schema_errors(gate))
+
+    def test_executed_gate_fields_cannot_be_null(self) -> None:
+        record, _ = self.prepare_accepted_run()
+        for status in ("passed", "failed"):
+            for field in EXECUTION_FIELDS[:6]:
+                with self.subTest(status=status, field=field):
+                    gate = copy.deepcopy(record["gate_results"][0])
+                    gate.update(status=status, failure_class=None if status == "passed" else "test-defect")
+                    gate[field] = None
+                    self.assertTrue(gate_schema_errors(gate))
+
+    def test_not_run_schema_rejects_every_execution_field(self) -> None:
+        record, _ = self.prepare_accepted_run()
+        original = record["gate_results"][0]
+        gate = not_run_result(original)
+        self.assertEqual(gate_schema_errors(gate), [])
+        for field in EXECUTION_FIELDS:
+            with self.subTest(field=field):
+                invalid = copy.deepcopy(gate)
+                invalid[field] = original[field]
+                self.assertTrue(gate_schema_errors(invalid))
+
+    def test_gate_note_schema_rules(self) -> None:
+        record, _ = self.prepare_accepted_run()
+        for status in ("passed", "failed", "not-run"):
+            for note in (None, "", "Reason", "x" * 500, "x" * 501):
+                with self.subTest(status=status, length=None if note is None else len(note)):
+                    gate = not_run_result(record["gate_results"][0]) if status == "not-run" else copy.deepcopy(record["gate_results"][0])
+                    gate.update(status=status, note=note)
+                    if status == "failed":
+                        gate["failure_class"] = "flaky"
+                    valid = (note is None or len(note) <= 500) and (status != "not-run" or bool(note))
+                    self.assertEqual(not gate_schema_errors(gate), valid)
+
+    @covers_adversarial("EVAL-GATE-NOT-RUN-AS-PASS")
+    def test_accepted_run_rejects_only_not_run_gate(self) -> None:
+        record, contract_path = self.prepare_accepted_run(gate_requires_approval=True)
+        record["gate_results"] = [not_run_result(record["gate_results"][0])]
+        sign_run_record(record)
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("accepted gate set differs from contract: missing=['GATE-TEST']", result.stderr)
+        self.assertNotIn("host attestation", result.stderr)
+        self.assertNotIn("payload-bound approval", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_accepted_run_allows_attested_failed_history(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run()
+        previous = run("git", "rev-parse", "HEAD^", cwd=self.repo).stdout.strip()
+        for revision in (baseline["current_revision"], previous):
+            with self.subTest(revision=revision):
+                record = copy.deepcopy(baseline)
+                failed = copy.deepcopy(record["gate_results"][0])
+                failed.update(status="failed", exit_code=1, failure_class="test-defect",
+                              revision=revision, execution_event_id="gate-failed-1")
+                failed["tree_sha256"] = hashlib.sha256(
+                    run("git", "ls-tree", "-r", "--full-tree", revision, cwd=self.repo).stdout.encode()
+                ).hexdigest()
+                sign_gate_result(failed)
+                record["gate_results"].insert(0, failed)
+                sign_run_record(record)
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_history_still_requires_host_attestation(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        failed = copy.deepcopy(record["gate_results"][0])
+        failed.update(status="failed", exit_code=1, failure_class="pre-existing",
+                      execution_event_id=None, execution_hmac_sha256=None)
+        record["gate_results"].append(failed)
+        sign_run_record(record)
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gate-result:GATE-TEST host attestation is incomplete", result.stderr)
+
+    def test_gate_attestation_binds_status_and_failure_class(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run()
+        failed = copy.deepcopy(baseline["gate_results"][0])
+        failed.update(status="failed", exit_code=1, failure_class="environment",
+                      execution_event_id="gate-failed-1")
+        sign_gate_result(failed)
+        for mutation in (
+            {"failure_class": "flaky"},
+            {"status": "passed", "failure_class": None, "exit_code": 0},
+        ):
+            with self.subTest(mutation=mutation):
+                record = copy.deepcopy(baseline)
+                forged = copy.deepcopy(failed)
+                forged.update(mutation)
+                self.assertEqual(gate_schema_errors(forged), [])
+                record["gate_results"] = [forged]
+                if forged["status"] == "failed":
+                    record["gate_results"].append(copy.deepcopy(baseline["gate_results"][0]))
+                sign_run_record(record)
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("gate-result:GATE-TEST host attestation HMAC is invalid", result.stderr)
+                self.assertNotIn("final run attestation payload hash", result.stderr)
+
+    def test_accepted_run_allows_unattested_not_run_history(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run()
+        previous = run("git", "rev-parse", "HEAD^", cwd=self.repo).stdout.strip()
+        for revision in (baseline["current_revision"], previous):
+            with self.subTest(revision=revision):
+                record = copy.deepcopy(baseline)
+                skipped = not_run_result(record["gate_results"][0])
+                skipped["revision"] = revision
+                skipped["tree_sha256"] = hashlib.sha256(
+                    run("git", "ls-tree", "-r", "--full-tree", revision, cwd=self.repo).stdout.encode()
+                ).hexdigest()
+                record["gate_results"].insert(0, skipped)
+                sign_run_record(record)
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_not_run_retains_command_and_input_binding(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run(gate_requires_approval=True)
+        for mutation, error in (
+            ({}, None),
+            ({"command_sha256": "0" * 64}, "command hash differs from contract"),
+            ({"resolved_inputs": [{"path": "other.py", "sha256": "0" * 64}]}, "resolved-input set differs from contract"),
+            ({"resolved_inputs": [{"path": "test_runner.py", "sha256": "0" * 64}]}, "resolved input differs from Git"),
+            ({"gate_id": "GATE-UNKNOWN"}, "run contains unknown gate results"),
+        ):
+            with self.subTest(mutation=mutation):
+                record = copy.deepcopy(baseline)
+                record.update(state="VERIFY", terminal_status="none")
+                record["state_transitions"] = record["state_transitions"][:6]
+                skipped = not_run_result(record["gate_results"][0])
+                skipped.update(mutation)
+                record["gate_results"] = [skipped]
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                if error is None:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(error, result.stderr)
+                self.assertNotIn("payload-bound approval", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_acceptance_requires_one_current_passing_result(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run()
+        for mutation, error in (
+            ({"revision": run("git", "rev-parse", "HEAD^", cwd=self.repo).stdout.strip()}, "missing=['GATE-TEST']"),
+            ({"tree_sha256": "0" * 64}, "missing=['GATE-TEST']"),
+            ({}, "duplicate passing gate results: GATE-TEST"),
+        ):
+            with self.subTest(mutation=mutation):
+                record = copy.deepcopy(baseline)
+                gate = record["gate_results"][0]
+                gate.update(mutation)
+                sign_gate_result(gate)
+                if not mutation:
+                    record["gate_results"].append(copy.deepcopy(gate))
+                sign_run_record(record)
+                self.write_record(record)
+                result = self.validate_with_contract(contract_path, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+
     def test_verified_not_attested_is_valid_with_independent_review_and_no_hmac(self) -> None:
         record, contract_path = self.prepare_accepted_run()
         record["terminal_status"] = "verified-not-attested"
         record["attestation_key_id"] = None
         record["gate_results"][0]["execution_event_id"] = None
         record["gate_results"][0]["execution_hmac_sha256"] = None
+        record["gate_results"].append(not_run_result(record["gate_results"][0]))
         record["review"]["review_event_id"] = None
         record["review"]["review_hmac_sha256"] = None
         record["run_attestation"] = {
@@ -367,6 +613,21 @@ class RunRecordToolsTests(unittest.TestCase):
         result = self.validate_with_contract(contract_path, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Valid run record", result.stdout)
+
+    def test_verified_not_attested_rejects_gate_host_attestation(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        record["terminal_status"] = "verified-not-attested"
+        record["attestation_key_id"] = None
+        record["review"]["review_event_id"] = None
+        record["review"]["review_hmac_sha256"] = None
+        record["run_attestation"] = {
+            "event_id": None, "actor": None, "payload_sha256": None, "hmac_sha256": None,
+        }
+        record["gate_results"].append(not_run_result(record["gate_results"][0]))
+        self.write_record(record)
+        result = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("verified-not-attested gate results must not claim host attestations", result.stderr)
 
     def test_verified_not_attested_rejects_fabricated_runtime_approvals(self) -> None:
         record, contract_path = self.prepare_accepted_run()
