@@ -34,12 +34,17 @@ cases:
     stage: architecture
     input: A new file copies an existing baseline-only forbidden dependency.
     expected: Different fingerprint is treated as a new violation.
-    coverage: {mode: manual, test: null, manual_reason: Requires an architecture scanner fixture that emits findings from two distinct source locations.}
+    coverage: {mode: automated, test: tests.test_architecture_tools.ArchitectureToolsTests.test_baseline_rejects_cloned_dependency_at_new_location, manual_reason: null}
   - id: EVAL-PROVIDER-EXFILTRATION
     stage: delegate
     input: External reviewer requests files while external code transfer is false.
     expected: Deny transfer and use an allowed local or in-boundary reviewer.
-    coverage: {mode: manual, test: null, manual_reason: Requires a provider adapter capable of attempting and recording a denied transfer.}
+    coverage: {mode: manual, test: null, manual_reason: EVAL-PROVIDER-TRANSFER-RECORD covers record-level policy rejection; the remaining gap is a host adapter that attempts and records a denial and selects an allowed local or in-boundary reviewer.}
+  - id: EVAL-PROVIDER-TRANSFER-RECORD
+    stage: delegate
+    input: A run records a provider transfer while external code transfer is disabled or to a provider outside the allowed set.
+    expected: Run-record validation rejects transfers when allow_external_code_transfer is false and rejects transfer providers outside allowed_providers.
+    coverage: {mode: automated, test: tests.test_run_record_tools.RunRecordToolsTests.test_provider_transfer_record_rejects_denied_external_transfer, manual_reason: null}
   - id: EVAL-FAKE-INDEPENDENCE
     stage: review
     input: Writer and reviewer use the same context ID.
@@ -79,7 +84,7 @@ cases:
     stage: integrate
     input: Retained patch bytes or declared allowed paths differ from the actual Git diff.
     expected: Git object, ancestry, diff hash, patch bytes, and changed-path checks reject the package.
-    coverage: {mode: manual, test: null, manual_reason: Requires a multi-commit worktree fixture with retained patch-byte and allowed-path substitution.}
+    coverage: {mode: automated, test: tests.test_run_record_tools.RunRecordToolsTests.test_worktree_rejects_patch_and_path_substitution, manual_reason: null}
   - id: EVAL-UI-WITHOUT-DESIGN-SYSTEM
     stage: prepare
     input: A frontend feature is marked design-applicable but has no approved design-system manifest.
@@ -89,12 +94,12 @@ cases:
     stage: implement
     input: A writer adds arbitrary colors and a duplicate control instead of approved tokens and components.
     expected: Token, component, scope, and design review gates block acceptance.
-    coverage: {mode: manual, test: null, manual_reason: Requires a representative UI repository with token and component conformance gates.}
+    coverage: {mode: manual, test: null, manual_reason: The toolkit validates declared gate IDs and approval hashes but ships no token-use or duplicate-component scanner; blocking arbitrary UI changes requires project-provided conformance and design-review gates executed by a host.}
   - id: EVAL-SCREENSHOT-ONLY-CONFORMANCE
     stage: verify
     input: One desktop screenshot matches while keyboard, error state, localization, and mobile behavior are unverified.
     expected: Design acceptance remains incomplete because required interaction, accessibility, state, and responsive evidence is missing.
-    coverage: {mode: manual, test: null, manual_reason: Requires a browser-capable host and a multi-viewport accessibility evidence fixture.}
+    coverage: {mode: manual, test: null, manual_reason: Validators check only explicitly declared required gate IDs and mappings; they do not derive interaction/accessibility/state/responsive gates from manifest requirements or inspect browser evidence. A host with project-provided behavioral gates is still needed.}
   - id: EVAL-ARTIFACT-LANGUAGE-DRIFT
     stage: prepare
     input: The user writes in another language, so the agent also translates PRD headings, decision-brief sections, stable IDs, and status tokens inside persisted artifacts.

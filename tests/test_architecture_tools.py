@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.eval_coverage import covers_adversarial
+
 
 ROOT = Path(__file__).resolve().parents[1]
 APPROVE = ROOT / "scripts/approve_architecture.py"
@@ -124,6 +126,62 @@ class ArchitectureToolsTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("severity increased", result.stderr)
+
+    @covers_adversarial("EVAL-BASELINE-CLONE")
+    def test_baseline_rejects_cloned_dependency_at_new_location(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            repo = Path(raw_temp)
+            run("git", "init", "-b", "main", cwd=repo)
+            run("git", "config", "user.name", "Test User", cwd=repo)
+            run("git", "config", "user.email", "test@example.com", cwd=repo)
+            (repo / "src").mkdir()
+            (repo / "src" / "controller.py").write_text("from database import query\n", encoding="utf-8")
+            run("git", "add", ".", cwd=repo)
+            run("git", "commit", "-m", "Add original dependency", cwd=repo)
+            head = run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
+            normalized = {
+                "rule_id": "ARCH-NO_DB", "rule_version": 1, "source": "controller",
+                "target": "database", "edge_kind": "data-access", "location": "src/controller.py:1",
+            }
+            clone = {**normalized, "location": "src/clone.py:1"}
+            fingerprints = [
+                hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                for item in (normalized, clone)
+            ]
+            self.assertNotEqual(*fingerprints)
+            baseline = {
+                "schema_version": 1, "generated_at": "2026-07-16T00:00:00Z", "source_revision": head,
+                "known_violations": [{
+                    "id": "ARCH-DEBT-1", **normalized, "severity": "medium",
+                    "fingerprint": fingerprints[0], "first_seen_revision": head,
+                    "reason": "Legacy direct access", "policy": "baseline-only",
+                    "owner": None, "review_after": None,
+                }],
+                "policy": {"allow_exact_baseline": True, "block_expansion": True, "block_new_instances": True},
+            }
+            baseline_path, findings_path = repo / "baseline.yaml", repo / "findings.yaml"
+            baseline_path.write_text(yaml.safe_dump(baseline, sort_keys=False), encoding="utf-8")
+            findings = [{**normalized, "severity": "medium"}]
+            findings_path.write_text(yaml.safe_dump(findings), encoding="utf-8")
+            command = (
+                "python3", str(VALIDATE_BASELINE), str(baseline_path), "--findings", str(findings_path),
+                "--schema", str(ROOT / "schemas/architecture-baseline.schema.json"),
+                "--repository", str(repo),
+            )
+            accepted = run(*command, cwd=repo, check=False)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            (repo / "src" / "clone.py").write_bytes((repo / "src" / "controller.py").read_bytes())
+            run("git", "add", "src/clone.py", cwd=repo)
+            run("git", "commit", "-m", "Clone the baselined dependency", cwd=repo)
+            findings.append({**clone, "severity": "medium"})
+            findings_path.write_text(yaml.safe_dump(findings), encoding="utf-8")
+            rejected = run(*command, cwd=repo, check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(
+                rejected.stderr,
+                f"ERROR: current findings contain new violations: {[fingerprints[1]]}\n",
+            )
 
     def test_current_findings_report_missing_normalized_fields_without_keyerror(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp:

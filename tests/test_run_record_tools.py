@@ -121,9 +121,13 @@ class RunRecordToolsTests(unittest.TestCase):
         )
 
     def prepare_accepted_run(
-        self, gate_requires_approval: bool = False, unexplained_change: bool = False
+        self, gate_requires_approval: bool = False, unexplained_change: bool = False,
+        with_worktree: bool = False, allow_external_code_transfer: bool = False,
     ) -> tuple[dict, Path]:
         contract = base_contract()
+        contract["provider_policy"]["allow_external_code_transfer"] = allow_external_code_transfer
+        if with_worktree:
+            contract["change_envelope"]["allowed_components"]["services"]["paths"].append("src/services/first.py")
         contract["automation"]["policy_sources"] = [
             {"source": "task", "mode": "bounded-auto"}
         ]
@@ -145,6 +149,35 @@ class RunRecordToolsTests(unittest.TestCase):
         run("git", "add", ".", cwd=self.repo)
         run("git", "commit", "-m", "Approve development contract", cwd=self.repo)
         base_head = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        worktrees = []
+        if with_worktree:
+            worktree_path = self.repo / ".ai" / "runs" / "writer-worktree"
+            run("git", "worktree", "add", "-b", "writer", str(worktree_path), base_head, cwd=self.repo)
+            (worktree_path / "src" / "services").mkdir(parents=True)
+            for name in ("first.py", "second.py"):
+                path = f"src/services/{name}"
+                (worktree_path / path).write_text("value = 1\n", encoding="utf-8")
+                run("git", "add", path, cwd=worktree_path)
+                run("git", "commit", "-m", f"Add {name}", cwd=worktree_path)
+            worktree_head = run("git", "rev-parse", "HEAD", cwd=worktree_path).stdout.strip()
+            run("git", "merge", "--ff-only", worktree_head, cwd=self.repo)
+            # Same tree and diff, but different ancestry, isolates the ancestry check.
+            sibling = run(
+                "git", "commit-tree", f"{worktree_head}^{{tree}}", "-p", self.head,
+                "-m", "Same contents without the approved base in ancestry", cwd=self.repo,
+            ).stdout.strip()
+            run("git", "merge", "--no-ff", sibling, "-m", "Retain both histories", cwd=self.repo)
+            patch_bytes = subprocess.check_output(
+                ["git", "diff", "--binary", f"{base_head}..{worktree_head}"], cwd=self.repo,
+            )
+            patch_path = self.repo / ".ai" / "runs" / "writer.patch"
+            patch_path.write_bytes(patch_bytes)
+            worktrees = [{
+                "package_id": "PKG-SERVICES", "path": str(worktree_path), "branch": "writer",
+                "base_revision": base_head, "head_revision": worktree_head,
+                "allowed_paths": ["src/services/**"], "patch_sha256": hashlib.sha256(patch_bytes).hexdigest(),
+                "patch_artifact_path": ".ai/runs/writer.patch", "status": "integrated",
+            }]
         if unexplained_change:
             (self.repo / "src" / "services").mkdir(parents=True)
             (self.repo / "src" / "services" / "unexplained.py").write_text("value = 1\n", encoding="utf-8")
@@ -156,7 +189,7 @@ class RunRecordToolsTests(unittest.TestCase):
         ).hexdigest()
         contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
         artifacts = self.repo / ".ai" / "runs"
-        artifacts.mkdir(parents=True)
+        artifacts.mkdir(parents=True, exist_ok=True)
         (artifacts / "gate.log").write_text("1 test passed\n", encoding="utf-8")
         (artifacts / "evidence.txt").write_text("AC-1 verified\n", encoding="utf-8")
         (artifacts / "review.md").write_text("No blocking findings.\n", encoding="utf-8")
@@ -167,6 +200,7 @@ class RunRecordToolsTests(unittest.TestCase):
             "contract_payload_sha256": contract["approval"]["contract_payload_sha256"],
             "state": "COMPLETE", "terminal_status": "accepted",
             "base_revision": base_head, "current_revision": head, "current_tree_sha256": tree,
+            "worktrees": worktrees,
         })
         record["roles"] = [
             {"role": "manager", "provider": "local", "model": "manager", "model_version": "1", "context_id": "manager-1", "permissions": ["read"]},
@@ -379,6 +413,81 @@ class RunRecordToolsTests(unittest.TestCase):
         result = self.validate_with_contract(contract_path, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Valid run record", result.stdout)
+
+    @covers_adversarial("EVAL-WORKTREE-PATCH-SUBSTITUTION")
+    def test_worktree_rejects_patch_and_path_substitution(self) -> None:
+        baseline, contract_path = self.prepare_accepted_run(with_worktree=True)
+        accepted = self.validate_with_contract(contract_path, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        worktree = baseline["worktrees"][0]
+        patch_path = self.repo / worktree["patch_artifact_path"]
+        patch_bytes = patch_path.read_bytes()
+        sibling = run("git", "rev-parse", f"{baseline['current_revision']}^2", cwd=self.repo).stdout.strip()
+        for substitution, expected in (
+            ("patch-bytes", "worktree patch artifact differs from git diff: PKG-SERVICES"),
+            ("patch-hash", "worktree patch hash differs from git diff: PKG-SERVICES"),
+            ("allowed-paths", "worktree changed path outside allowed_paths: src/services/second.py"),
+            ("ancestry", "worktree base is not an ancestor of head: PKG-SERVICES"),
+        ):
+            with self.subTest(substitution=substitution):
+                record = copy.deepcopy(baseline)
+                worktree = record["worktrees"][0]
+                patch_path.write_bytes(patch_bytes)
+                if substitution == "patch-bytes":
+                    patch_path.write_bytes(patch_bytes + b"substituted bytes\n")
+                elif substitution == "patch-hash":
+                    worktree["patch_sha256"] = "0" * 64
+                elif substitution == "allowed-paths":
+                    worktree["allowed_paths"] = ["src/services/first.py"]
+                else:
+                    worktree["head_revision"] = sibling
+                sign_run_record(record)
+                self.write_record(record)
+                rejected = self.validate_with_contract(contract_path, check=False)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertEqual(rejected.stderr, f"ERROR: {expected}\n")
+
+    @covers_adversarial("EVAL-PROVIDER-TRANSFER-RECORD")
+    def test_provider_transfer_record_rejects_denied_external_transfer(self) -> None:
+        record, contract_path = self.prepare_accepted_run()
+        accepted = self.validate_with_contract(contract_path, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        payload_path = self.repo / ".ai" / "runs" / "provider-payload.txt"
+        payload_path.write_bytes((self.repo / "test_runner.py").read_bytes())
+        record["provider_transfers"] = [{
+            "provider": "local", "context_id": "reviewer-1", "paths": ["test_runner.py"],
+            "redaction_policy": "deny", "retained_payload_path": ".ai/runs/provider-payload.txt",
+            "payload_sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+        }]
+        sign_run_record(record)
+        self.write_record(record)
+        rejected = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(
+            rejected.stderr, "ERROR: provider transfers exist while external code transfer is denied\n",
+        )
+
+    @covers_adversarial("EVAL-PROVIDER-TRANSFER-RECORD")
+    def test_provider_transfer_record_rejects_provider_outside_allowed_set(self) -> None:
+        record, contract_path = self.prepare_accepted_run(allow_external_code_transfer=True)
+        payload_path = self.repo / ".ai" / "runs" / "provider-payload.txt"
+        payload_path.write_bytes((self.repo / "test_runner.py").read_bytes())
+        record["provider_transfers"] = [{
+            "provider": "local", "context_id": "reviewer-1", "paths": ["test_runner.py"],
+            "redaction_policy": "deny", "retained_payload_path": ".ai/runs/provider-payload.txt",
+            "payload_sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+        }]
+        sign_run_record(record)
+        self.write_record(record)
+        accepted = self.validate_with_contract(contract_path, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        record["provider_transfers"][0]["provider"] = "unlisted-provider"
+        sign_run_record(record)
+        self.write_record(record)
+        rejected = self.validate_with_contract(contract_path, check=False)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(rejected.stderr, "ERROR: transfer provider is not allowed: unlisted-provider\n")
 
     def test_schema_2_run_record_is_rejected(self) -> None:
         record = yaml.safe_load(self.record_path.read_text(encoding="utf-8"))
