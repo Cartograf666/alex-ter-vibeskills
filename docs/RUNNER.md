@@ -21,6 +21,8 @@ The kernel is responsible for:
 - **Transaction Marker**: `.ai/runs/<run-id>.transaction.yaml`
 - **Run Lock File**: `.ai/runs/<run-id>.lock`
 
+Run records use schema version 3. Version 2 records are intentionally rejected in this alpha; re-run `init` with a new run ID to create a schema 3 record. There is no in-place migration.
+
 ---
 
 ## Subprocess-Only Trust Boundary & Security Architecture

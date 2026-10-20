@@ -34,9 +34,11 @@ Package-manager install and lifecycle scripts are untrusted code. Do not install
 
 Never pass provider API keys to models or store secrets in prompts, RunState, logs, packets, or run records.
 
-An accepted run must have no source-tree changes outside the committed revision. Run metadata, logs, patch artifacts, evidence, and review findings belong under `.ai/runs/`; each retained artifact is checked by path and SHA-256. Gate and review evidence must refer to the same committed-tree hash.
+An accepted run must have no source-tree changes outside the committed revision. Run metadata, logs, patch artifacts, evidence, and review findings belong under `.ai/runs/`; each retained artifact is checked by path and SHA-256. Passing gate and review evidence must refer to the current committed-tree hash; failed and not-run history may refer to earlier revisions.
 
-The trusted host must attest every gate result, the independent review result, and the final canonical run-record payload with a selected key of at least 32 random bytes. Store its non-secret `attestation_key_id` in the record and resolve it from `VIBESKILLS_RUN_HMAC_KEYS`; the `default` ID may use `VIBESKILLS_RUN_HMAC_KEY`. Retain retired verification keys for historical audit and revoke compromised IDs. Run validation is a host operation. If the selected key or attestation is unavailable, the validator fails closed and the terminal status cannot be `accepted`.
+The trusted host must attest every executed gate result (`passed` or `failed`, including historical failures), the independent review result, and the final canonical run-record payload with a selected key of at least 32 random bytes. Store its non-secret `attestation_key_id` in the record and resolve it from `VIBESKILLS_RUN_HMAC_KEYS`; the `default` ID may use `VIBESKILLS_RUN_HMAC_KEY`. Retain retired verification keys for historical audit and revoke compromised IDs. Run validation is a host operation. If the selected key or attestation is unavailable, the validator fails closed and the terminal status cannot be `accepted`.
+
+The gate execution HMAC payload binds `status` and `failure_class` alongside execution evidence. A `not-run` result never claims execution attestation; its execution fields are null, and the final canonical run-record attestation still covers its outcome, classification, note, and intended command/input/revision/tree bindings.
 
 ## Provider privacy
 

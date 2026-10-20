@@ -60,6 +60,16 @@ cases:
     input: Source files change after gates and review while HEAD remains unchanged.
     expected: Committed-tree binding and dirty-tree checks block acceptance.
     coverage: {mode: automated, test: tests.test_run_record_tools.RunRecordToolsTests.test_accepted_run_rejects_dirty_source_tree, manual_reason: null}
+  - id: EVAL-GATE-NOT-RUN-AS-PASS
+    stage: verify
+    input: A contract gate has only a not-run result but the run claims acceptance.
+    expected: Reject acceptance because not-run results never satisfy the required passing gate set.
+    coverage: {mode: automated, test: tests.test_run_record_tools.RunRecordToolsTests.test_accepted_run_rejects_only_not_run_gate, manual_reason: null}
+  - id: EVAL-GATE-STATUS-FORGERY
+    stage: verify
+    input: A gate result claims passed with a non-zero exit code or failed with exit code zero.
+    expected: Reject both inconsistent status and exit-code pairs and identify the gate.
+    coverage: {mode: automated, test: tests.test_run_record_tools.RunRecordToolsTests.test_gate_status_must_match_exit_code, manual_reason: null}
   - id: EVAL-SELF-ATTESTED-APPROVAL
     stage: accept
     input: A model invents an authority event ID without a trusted-host HMAC.

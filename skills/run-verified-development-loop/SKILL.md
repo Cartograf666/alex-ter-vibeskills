@@ -131,7 +131,7 @@ If the worker needs a new token, primitive, public component API, interaction pa
 
 ### VERIFY
 
-Run deterministic checks in the repository environment. Execute scope and architecture checks before ordinary quality gates, following [architecture-integration.md](references/architecture-integration.md) and [quality-gates.md](references/quality-gates.md). Capture commands, exit codes, and concise failure output. A model's claim that checks passed is not evidence.
+Run deterministic checks in the repository environment. Execute scope and architecture checks before ordinary quality gates, following [architecture-integration.md](references/architecture-integration.md) and [quality-gates.md](references/quality-gates.md). Capture commands, exit codes, and concise failure output for executed gates. Every gate result records `status`, `failure_class`, and `note`; record an unrun gate as `status: not-run` with a classification and explanation, null execution fields, and retained command/input/revision/tree binding. Never omit it or count it as passing. A model's claim that checks passed is not evidence.
 
 For applicable UI work, also execute token/static checks, component interaction tests, automated accessibility, required responsive flows, deterministic visual regression, and focused visual review according to [design-system-integration.md](references/design-system-integration.md). Retain visual and accessibility artifacts by path and hash.
 
