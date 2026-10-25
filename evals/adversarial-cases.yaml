@@ -90,6 +90,11 @@ cases:
     input: A frontend feature is marked design-applicable but has no approved design-system manifest.
     expected: Contract validation blocks authorization until a discovered or selected system is approved.
     coverage: {mode: automated, test: tests.test_contract_tools.ContractToolsTests.test_ui_contract_requires_approved_design_system_and_declared_gates, manual_reason: null}
+  - id: EVAL-UI-PARTIAL-DESIGN-GATES
+    stage: plan
+    input: A UI contract's design policy requires only some of the gates its approved design-system manifest lists.
+    expected: Contract validation fails and names the omitted manifest gates.
+    coverage: {mode: automated, test: tests.test_contract_tools.ContractToolsTests.test_ui_contract_rejects_omitted_manifest_design_gate, manual_reason: null}
   - id: EVAL-ONE-OFF-UI-BYPASS
     stage: implement
     input: A writer adds arbitrary colors and a duplicate control instead of approved tokens and components.
@@ -99,7 +104,7 @@ cases:
     stage: verify
     input: One desktop screenshot matches while keyboard, error state, localization, and mobile behavior are unverified.
     expected: Design acceptance remains incomplete because required interaction, accessibility, state, and responsive evidence is missing.
-    coverage: {mode: manual, test: null, manual_reason: Validators check only explicitly declared required gate IDs and mappings; they do not derive interaction/accessibility/state/responsive gates from manifest requirements or inspect browser evidence. A host with project-provided behavioral gates is still needed.}
+    coverage: {mode: manual, test: null, manual_reason: "Omitting manifest design gates from a contract is now rejected by EVAL-UI-PARTIAL-DESIGN-GATES; the remaining gap is that validators do not inspect evidence content or confirm that a gate's command exercises keyboard, state, localization and viewport behaviour, so a host with project-provided behavioural gates is still needed."}
   - id: EVAL-ARTIFACT-LANGUAGE-DRIFT
     stage: prepare
     input: The user writes in another language, so the agent also translates PRD headings, decision-brief sections, stable IDs, and status tokens inside persisted artifacts.

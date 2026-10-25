@@ -16,6 +16,7 @@ Automated accessibility tools do not replace keyboard, screen-reader, focus-orde
 
 ## Evidence rules
 
+- The approved manifest's `quality_gate_ids` is the set every UI contract must require. Adding a gate to the manifest requires re-approving the manifest and updating later contracts; a contract prepared earlier with a subset no longer validates and must be prepared again. Run records bound to such contracts also fail validation because run-record validation calls the same contract validation.
 - Bind each design acceptance criterion to named gate IDs.
 - Include token sources, component registries, package manifests, visual-test configuration, and accessibility configuration in the resolved input manifests of relevant gates.
 - Retain screenshot, accessibility, interaction, and review artifacts by path and SHA-256.
