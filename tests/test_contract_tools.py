@@ -498,6 +498,86 @@ class ContractToolsTests(unittest.TestCase):
         self.assertNotEqual(missing_mapping.returncode, 0)
         self.assertIn("design gates are not mapped", missing_mapping.stderr)
 
+    def ui_contract_with_approved_design_gates(self) -> dict:
+        (self.repo / "tokens.css").write_text(":root { --color-text: #111; }\n", encoding="utf-8")
+        (self.repo / "components").mkdir()
+        design = yaml.safe_load((ROOT / "examples/design-system.yaml").read_text(encoding="utf-8"))
+        design["tokens"]["source_paths"] = ["tokens.css"]
+        design["components"]["registry_paths"] = ["components"]
+        design["components"]["documentation_paths"] = []
+        design["quality_gate_ids"] = ["GATE-VISUAL", "GATE-INTERACTION", "GATE-A11Y"]
+        design_path = self.repo / "design-system.yaml"
+        design_path.write_text(yaml.safe_dump(design, sort_keys=False), encoding="utf-8")
+        run(
+            "python3", str(APPROVE_DESIGN), str(design_path), "--approved-by", "owner@example.com",
+            "--repository", str(self.repo), cwd=self.repo,
+        )
+        (self.repo / "DESIGN-BRIEF.md").write_text(
+            "# Design Brief\n\nUse approved tokens and verify responsive states.\n", encoding="utf-8"
+        )
+        contract = copy.deepcopy(base_contract())
+        contract["source_documents"]["design_system_manifest"] = "design-system.yaml"
+        contract["source_documents"]["design_brief"] = "DESIGN-BRIEF.md"
+        contract["design_policy"] = {
+            "applies": True, "reason": "The feature contains an interactive user interface.",
+            "system_status": "approved-custom",
+            "required_gate_ids": list(design["quality_gate_ids"]),
+            "acceptance": ["The interface uses approved tokens and components."],
+        }
+        existing_gate = contract["quality_gates"][0]
+        contract["quality_gates"] = []
+        for gate_id in design["quality_gate_ids"]:
+            gate = copy.deepcopy(existing_gate)
+            gate["id"] = gate_id
+            contract["quality_gates"].append(gate)
+        contract["run_spec"]["acceptance_criteria"][0]["verification_gate_ids"] = list(
+            design["quality_gate_ids"]
+        )
+        return contract
+
+    @covers_adversarial("EVAL-UI-PARTIAL-DESIGN-GATES")
+    def test_ui_contract_requires_all_manifest_design_gates(self) -> None:
+        contract = self.ui_contract_with_approved_design_gates()
+        self.write_contract(contract)
+        self.assertIn("Valid development contract", self.validate().stdout)
+
+    @covers_adversarial("EVAL-UI-PARTIAL-DESIGN-GATES")
+    def test_ui_contract_rejects_omitted_manifest_design_gate(self) -> None:
+        contract = self.ui_contract_with_approved_design_gates()
+        removed_gate = contract["design_policy"]["required_gate_ids"].pop()
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"design policy omits design-system manifest gates: {[removed_gate]}", result.stderr
+        )
+
+        contract["design_policy"]["required_gate_ids"].append(removed_gate)
+        self.write_contract(contract)
+        self.assertIn("Valid development contract", self.validate().stdout)
+
+    def test_ui_contract_rejects_manifest_gate_absent_from_contract(self) -> None:
+        contract = self.ui_contract_with_approved_design_gates()
+        contract["quality_gates"].pop()
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "design policy requires gates absent from the development contract", result.stderr
+        )
+        self.assertNotIn("design policy omits design-system manifest gates", result.stderr)
+
+    def test_ui_contract_rejects_required_gate_absent_from_manifest(self) -> None:
+        contract = self.ui_contract_with_approved_design_gates()
+        contract["design_policy"]["required_gate_ids"].append("GATE-EXTRA")
+        self.write_contract(contract)
+        result = self.validate(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "design policy requires gates absent from the design-system manifest", result.stderr
+        )
+        self.assertNotIn("design policy omits design-system manifest gates", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

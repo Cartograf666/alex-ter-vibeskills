@@ -67,6 +67,7 @@ design_policy:
   applies: false
   reason: Replace with why UI design is or is not part of this task.
   system_status: not-applicable
+  # When applies is true, list exactly the quality_gate_ids of the approved design-system manifest.
   required_gate_ids: []
   acceptance: []
 

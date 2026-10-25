@@ -35,7 +35,7 @@ Accept an incomplete or very short initial prompt. Build the coverage matrix fro
 
 For a new project, gather product intent and bootstrap architecture through `architecture-governance` when available. For an existing project, treat the approved architecture manifest and baseline as project constraints.
 
-Classify design applicability explicitly. For UI work, inspect the approved design system, tokens, component explorer, design files, current screens, accessibility setup, and visual tests. For non-UI work, record a concrete not-applicable reason in `design_policy`.
+Classify design applicability explicitly. For UI work, inspect the approved design system, tokens, component explorer, design files, current screens, accessibility setup, and visual tests. Set `design_policy.required_gate_ids` for UI work to the complete `quality_gate_ids` of the approved manifest, declare each in the contract's `quality_gates`, and map each to an acceptance criterion; otherwise validation rejects the contract. For non-UI work, record a concrete not-applicable reason in `design_policy`.
 
 ## Resolve ambiguity
 

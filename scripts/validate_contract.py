@@ -257,6 +257,9 @@ def validate_semantics(contract: dict[str, Any], repository: Path) -> list[str]:
                 if design_policy["system_status"] != source_to_status[design_manifest["source"]["type"]]:
                     error("design_policy.system_status differs from design-system source", errors)
                 required_design_gates = set(design_policy["required_gate_ids"])
+                omitted = set(design_manifest["quality_gate_ids"]) - required_design_gates
+                if omitted:
+                    error(f"design policy omits design-system manifest gates: {sorted(omitted)}", errors)
                 if not required_design_gates <= set(design_manifest["quality_gate_ids"]):
                     error("design policy requires gates absent from the design-system manifest", errors)
                 if not required_design_gates <= gate_id_set:
